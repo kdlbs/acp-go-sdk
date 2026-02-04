@@ -99,18 +99,18 @@ func (c *Connection) receive() {
 		case msg.ID != nil && msg.Method == "":
 			c.handleResponse(&msg)
 		case msg.Method != "":
-			// Only track notifications (no ID) in the WaitGroup, not requests (with ID).
-			// This prevents deadlock when a request handler makes another request.
+			// Notifications (no ID) are processed synchronously to preserve ordering.
+			// This is critical for streaming updates like message_chunk where order matters.
+			// Requests (with ID) are processed in goroutines to prevent deadlock when
+			// a request handler makes another request.
 			isNotification := msg.ID == nil
 			if isNotification {
 				c.notificationWg.Add(1)
+				c.handleInbound(&msg)
+				c.notificationWg.Done()
+			} else {
+				go c.handleInbound(&msg)
 			}
-			go func(m *anyMessage, isNotif bool) {
-				if isNotif {
-					defer c.notificationWg.Done()
-				}
-				c.handleInbound(m)
-			}(&msg, isNotification)
 		default:
 			c.loggerOrDefault().Error("received message with neither id nor method", "raw", string(line))
 		}
