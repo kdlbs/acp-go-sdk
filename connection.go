@@ -94,7 +94,15 @@ func (c *Connection) receive() {
 		case msg.ID != nil && msg.Method == "":
 			c.handleResponse(&msg)
 		case msg.Method != "":
-			go c.handleInbound(&msg)
+			// Notifications (no ID) are processed synchronously to preserve ordering.
+			// This is critical for streaming updates like message_chunk where order matters.
+			// Requests (with ID) are processed in goroutines to prevent deadlock when
+			// a request handler makes another request.
+			if msg.ID == nil {
+				c.handleInbound(&msg)
+			} else {
+				go c.handleInbound(&msg)
+			}
 		default:
 			c.loggerOrDefault().Error("received message with neither id nor method", "raw", string(line))
 		}
