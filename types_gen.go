@@ -2513,6 +2513,10 @@ type LoadSessionResponse struct {
 	//
 	// See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
 	Modes *SessionModeState `json:"modes,omitempty"`
+	// kandev: legacy "models" field still emitted by pre-v0.13.5 agents (auggie 0.29.x).
+	// Upstream removed this in v0.13.5; kept here for read-only fallback.
+	// See types_legacy.go for the type definitions.
+	LegacyModels *LegacyModels `json:"models,omitempty"`
 }
 
 func (v *LoadSessionResponse) Validate() error {
@@ -3282,6 +3286,10 @@ type NewSessionResponse struct {
 	//
 	// Used in all subsequent requests for this conversation.
 	SessionId SessionId `json:"sessionId"`
+	// kandev: legacy "models" field still emitted by pre-v0.13.5 agents (auggie 0.29.x).
+	// Upstream removed this in v0.13.5; kept here for read-only fallback.
+	// See types_legacy.go for the type definitions.
+	LegacyModels *LegacyModels `json:"models,omitempty"`
 }
 
 func (v *NewSessionResponse) Validate() error {
@@ -7750,6 +7758,10 @@ type UnstableForkSessionResponse struct {
 	Modes *SessionModeState `json:"modes,omitempty"`
 	// Unique identifier for the newly created forked session.
 	SessionId SessionId `json:"sessionId"`
+	// kandev: legacy "models" field still emitted by pre-v0.13.5 agents (auggie 0.29.x).
+	// Upstream removed this in v0.13.5; kept here for read-only fallback.
+	// See types_legacy.go for the type definitions.
+	LegacyModels *LegacyModels `json:"models,omitempty"`
 }
 
 func (v *UnstableForkSessionResponse) Validate() error {
