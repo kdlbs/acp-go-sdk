@@ -1387,6 +1387,69 @@ func TestExtensionMethods_UnknownNotification_DoesNotLog(t *testing.T) {
 	}
 }
 
+func TestConnectionReceivesLargeSingleLineNotification(t *testing.T) {
+	_, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+
+	received := make(chan string, 1)
+	c := NewClientSideConnection(&clientFuncs{
+		SessionUpdateFunc: func(_ context.Context, n SessionNotification) error {
+			chunk := n.Update.AgentMessageChunk
+			if chunk == nil {
+				t.Fatalf("SessionUpdate.AgentMessageChunk is nil: %#v", n.Update)
+			}
+			text := chunk.Content.Text
+			if text == nil {
+				t.Fatalf("AgentMessageChunk.Content.Text is nil: %#v", chunk.Content)
+			}
+			received <- text.Text
+			return nil
+		},
+	}, c2aW, a2cR)
+
+	const oversizedBytes = 11 * 1024 * 1024
+	text := strings.Repeat("x", oversizedBytes)
+	frame := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  ClientMethodSessionUpdate,
+		"params": map[string]any{
+			"sessionId": "session-1",
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"content": map[string]any{
+					"type": "text",
+					"text": text,
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(frame)
+	if err != nil {
+		t.Fatalf("marshal frame: %v", err)
+	}
+	data = append(data, '\n')
+
+	writeErr := make(chan error, 1)
+	go func() {
+		_, err := a2cW.Write(data)
+		writeErr <- err
+	}()
+
+	select {
+	case got := <-received:
+		if len(got) != oversizedBytes {
+			t.Fatalf("received text length = %d, want %d", len(got), oversizedBytes)
+		}
+		if err := <-writeErr; err != nil {
+			t.Fatalf("write large frame: %v", err)
+		}
+	case <-c.Done():
+		t.Fatal("connection closed before receiving oversized notification")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for oversized notification")
+	}
+}
+
 func TestExtensionMethods_AgentToClientRequest(t *testing.T) {
 	c2aR, c2aW := io.Pipe()
 	a2cR, a2cW := io.Pipe()

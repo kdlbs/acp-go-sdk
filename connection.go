@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -17,6 +18,8 @@ import (
 const (
 	notificationQueueDrainTimeout = 5 * time.Second
 	defaultMaxQueuedNotifications = 1024
+	initialReadBufferSize         = 1024 * 1024
+	maxJSONRPCLineBytes           = 64 * 1024 * 1024
 )
 
 // ErrNotificationQueueOverflow is the cancellation cause used when the inbound
@@ -398,17 +401,18 @@ func formatCanonicalJSONRPCNumericID(negative bool, digits string, exp10 int) (s
 }
 
 func (c *Connection) receive() {
-	const (
-		initialBufSize = 1024 * 1024
-		maxBufSize     = 10 * 1024 * 1024
-	)
+	reader := bufio.NewReaderSize(c.r, initialReadBufferSize)
 
-	scanner := bufio.NewScanner(c.r)
-	buf := make([]byte, 0, initialBufSize)
-	scanner.Buffer(buf, maxBufSize)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for {
+		line, err := readJSONRPCLine(reader, maxJSONRPCLineBytes)
+		if err != nil {
+			cause := errors.New("peer connection closed")
+			if !errors.Is(err, io.EOF) {
+				cause = err
+			}
+			c.shutdownReceive(cause)
+			return
+		}
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
@@ -485,12 +489,27 @@ func (c *Connection) receive() {
 			c.loggerOrDefault().Error("received message with neither id nor method", "raw", string(line))
 		}
 	}
+}
 
-	cause := errors.New("peer connection closed")
-	if err := scanner.Err(); err != nil {
-		cause = err
+func readJSONRPCLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
+	var line []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		line = append(line, chunk...)
+		if len(line) > maxBytes {
+			return nil, fmt.Errorf("json-rpc message line exceeds %d bytes", maxBytes)
+		}
+		switch {
+		case err == nil:
+			return line, nil
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF) && len(line) > 0:
+			return line, nil
+		default:
+			return nil, err
+		}
 	}
-	c.shutdownReceive(cause)
 }
 
 func (c *Connection) shutdownReceive(cause error) {
