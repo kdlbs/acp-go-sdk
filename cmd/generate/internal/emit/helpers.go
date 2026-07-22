@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/coder/acp-go-sdk/cmd/generate/internal/ir"
 	"github.com/coder/acp-go-sdk/cmd/generate/internal/load"
 	"github.com/coder/acp-go-sdk/cmd/generate/internal/util"
 )
@@ -33,11 +34,18 @@ func WriteHelpersJen(outDir string, schema *load.Schema, _ *load.Meta) error {
 	sort.Strings(keys)
 	for _, name := range keys {
 		def := schema.Defs[name]
-		if def == nil || def.DocsIgnore || len(def.OneOf) == 0 {
+		if def == nil || def.DocsIgnore {
+			continue
+		}
+		unionDefs := def.OneOf
+		if len(unionDefs) == 0 {
+			unionDefs = def.AnyOf
+		}
+		if len(unionDefs) == 0 {
 			continue
 		}
 		// Skip string-const unions
-		if isStringConstUnion(def) {
+		if isStringConstUnion(def) || isOpenStringEnum(def) {
 			continue
 		}
 		// Skip generating New... helpers for unions that have stable, static helpers
@@ -56,6 +64,7 @@ func WriteHelpersJen(outDir string, schema *load.Schema, _ *load.Meta) error {
 			required  []string
 			props     map[string]*load.Definition
 		}
+		alternatives := expandUnionAlternatives(schema, unionDefs)
 		discKey := ""
 		// Use schema's explicit discriminator if available (matching types emitter)
 		if def.Discriminator != nil {
@@ -63,12 +72,12 @@ func WriteHelpersJen(outDir string, schema *load.Schema, _ *load.Meta) error {
 		}
 		// Fallback: discover discriminator key by scanning for const properties
 		if discKey == "" {
-			for _, v := range def.OneOf {
+			for _, alternative := range alternatives {
+				v := alternative.def
 				if v == nil {
 					continue
 				}
-				expanded := expandAllOf(schema, v)
-				for k, pd := range expanded.Properties {
+				for k, pd := range v.Properties {
 					if pd != nil && pd.Const != nil {
 						discKey = k
 						break
@@ -80,38 +89,27 @@ func WriteHelpersJen(outDir string, schema *load.Schema, _ *load.Meta) error {
 			}
 		}
 		variants := []vinfo{}
-		for idx, v := range def.OneOf {
-			if v == nil {
+		for idx, alternative := range alternatives {
+			v := alternative.def
+			if v == nil || ir.PrimaryType(v) != "object" {
 				continue
 			}
-			// Match the types emitter's allOf-to-ref shortcut
-			ref := v.Ref
-			if ref == "" &&
-				v.Type == nil &&
-				len(v.Properties) == 0 &&
-				len(v.Required) == 0 &&
-				len(v.Enum) == 0 &&
-				v.Items == nil &&
-				len(v.AnyOf) == 0 &&
-				len(v.OneOf) == 0 &&
-				len(v.AllOf) == 1 &&
-				v.AllOf[0] != nil &&
-				v.AllOf[0].Ref != "" {
-				ref = v.AllOf[0].Ref
+			ref := alternative.ref
+			if len(def.Properties) > 0 {
+				ref = ""
 			}
-			v = expandAllOf(schema, v)
 
 			// Compute type name matching the types emitter (emitUnion)
 			tname := ""
 			if ref != "" && strings.HasPrefix(ref, "#/$defs/") {
 				tname = ref[len("#/$defs/"):]
 			} else if v.Title != "" {
-				tname = generateNestedTypeName(name, v.Title, usedTypeNames)
+				tname = generateNestedTypeName(name, v.Title+alternative.nameSuffix, usedTypeNames)
 				usedTypeNames[tname] = true
 			} else {
 				if discKey != "" {
 					if pd := v.Properties[discKey]; pd != nil && pd.Const != nil {
-						s := fmt.Sprint(pd.Const)
+						s := fmt.Sprint(pd.Const) + alternative.nameSuffix
 						tname = generateNestedTypeName(name, s, usedTypeNames)
 						usedTypeNames[tname] = true
 					}
@@ -129,20 +127,27 @@ func WriteHelpersJen(outDir string, schema *load.Schema, _ *load.Meta) error {
 			if discKey != "" {
 				if pd := v.Properties[discKey]; pd != nil && pd.Const != nil {
 					s := fmt.Sprint(pd.Const)
-					fieldName = util.ToExportedField(s)
+					fieldName = util.ToExportedField(s + alternative.nameSuffix)
 					dv = s
 				}
 			}
 			if fieldName == "" && v.Title != "" {
-				fieldName = util.ToExportedField(v.Title)
+				fieldName = util.ToExportedField(v.Title + alternative.nameSuffix)
 			}
 			if fieldName == "" {
 				fieldName = util.ToExportedField(tname)
 			}
-			// collect required
-			req := make([]string, len(v.Required))
-			copy(req, v.Required)
-			variants = append(variants, vinfo{fieldName: fieldName, typeName: tname, discKey: discKey, discValue: dv, required: req, props: v.Properties})
+			// Merge parent/shared properties and required fields into each concrete
+			// alternative so constructor signatures match the flattened wire type.
+			props := make(map[string]*load.Definition, len(def.Properties)+len(v.Properties))
+			for propertyName, property := range def.Properties {
+				props[propertyName] = property
+			}
+			for propertyName, property := range v.Properties {
+				props[propertyName] = property
+			}
+			req := mergeRequired(v.Required, def.Required)
+			variants = append(variants, vinfo{fieldName: fieldName, typeName: tname, discKey: discKey, discValue: dv, required: req, props: props})
 		}
 		// Emit helper per variant: func New<Union><FieldName>(...) <Union>
 		for _, vi := range variants {
@@ -150,7 +155,7 @@ func WriteHelpersJen(outDir string, schema *load.Schema, _ *load.Meta) error {
 			params := []Code{}
 			assigns := Dict{}
 			for _, rk := range vi.required {
-				if rk == vi.discKey {
+				if rk == vi.discKey && vi.discValue != "" {
 					continue
 				}
 				pd := vi.props[rk]

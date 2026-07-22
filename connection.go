@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -17,9 +18,33 @@ import (
 const (
 	notificationQueueDrainTimeout = 5 * time.Second
 	defaultMaxQueuedNotifications = 1024
+	initialReadBufferSize         = 1024 * 1024
+	maxJSONRPCLineBytes           = 64 * 1024 * 1024
 )
 
-var errNotificationQueueOverflow = errors.New("notification queue overflow")
+// ErrNotificationQueueOverflow is the cancellation cause used when the inbound
+// notification queue reaches its configured per-connection capacity.
+var ErrNotificationQueueOverflow = errors.New("notification queue overflow")
+
+var errNotificationQueueOverflow = ErrNotificationQueueOverflow
+
+type connectionOptions struct {
+	maxQueuedNotifications int
+}
+
+// ConnectionOption configures a Connection.
+type ConnectionOption func(*connectionOptions)
+
+// WithMaxQueuedNotifications sets the per-connection capacity of the inbound
+// notification queue. Values less than or equal to zero use the default.
+//
+// This bounds inbound notification buffering only; outbound notifications and
+// requests are unaffected.
+func WithMaxQueuedNotifications(n int) ConnectionOption {
+	return func(o *connectionOptions) {
+		o.maxQueuedNotifications = n
+	}
+}
 
 type anyMessage struct {
 	JSONRPC string           `json:"jsonrpc"`
@@ -88,24 +113,36 @@ type Connection struct {
 
 	// notificationQueue serializes notification processing to maintain order.
 	// It is bounded to keep memory usage predictable.
-	notificationQueue chan queuedNotification
+	maxQueuedNotifications int
+	notificationQueue      chan queuedNotification
 }
 
-func NewConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader) *Connection {
+func NewConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader, opts ...ConnectionOption) *Connection {
+	options := connectionOptions{maxQueuedNotifications: defaultMaxQueuedNotifications}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+	if options.maxQueuedNotifications <= 0 {
+		options.maxQueuedNotifications = defaultMaxQueuedNotifications
+	}
+
 	ctx, cancel := context.WithCancelCause(context.Background())
 	inboundCtx, inboundCancel := context.WithCancelCause(context.Background())
 	c := &Connection{
-		w:                   peerInput,
-		r:                   peerOutput,
-		handler:             handler,
-		pending:             make(map[string]*pendingResponse),
-		inflight:            make(map[string]context.CancelCauseFunc),
-		cancelRequestSignal: make(chan struct{}, 1),
-		ctx:                 ctx,
-		cancel:              cancel,
-		inboundCtx:          inboundCtx,
-		inboundCancel:       inboundCancel,
-		notificationQueue:   make(chan queuedNotification, defaultMaxQueuedNotifications),
+		w:                      peerInput,
+		r:                      peerOutput,
+		handler:                handler,
+		pending:                make(map[string]*pendingResponse),
+		inflight:               make(map[string]context.CancelCauseFunc),
+		cancelRequestSignal:    make(chan struct{}, 1),
+		ctx:                    ctx,
+		cancel:                 cancel,
+		inboundCtx:             inboundCtx,
+		inboundCancel:          inboundCancel,
+		maxQueuedNotifications: options.maxQueuedNotifications,
+		notificationQueue:      make(chan queuedNotification, options.maxQueuedNotifications),
 	}
 	c.notifyCond = sync.NewCond(&c.notifyMu)
 	go func() {
@@ -364,17 +401,18 @@ func formatCanonicalJSONRPCNumericID(negative bool, digits string, exp10 int) (s
 }
 
 func (c *Connection) receive() {
-	const (
-		initialBufSize = 1024 * 1024
-		maxBufSize     = 10 * 1024 * 1024
-	)
+	reader := bufio.NewReaderSize(c.r, initialReadBufferSize)
 
-	scanner := bufio.NewScanner(c.r)
-	buf := make([]byte, 0, initialBufSize)
-	scanner.Buffer(buf, maxBufSize)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for {
+		line, err := readJSONRPCLine(reader, maxJSONRPCLineBytes)
+		if err != nil {
+			cause := errors.New("peer connection closed")
+			if !errors.Is(err, io.EOF) {
+				cause = err
+			}
+			c.shutdownReceive(cause)
+			return
+		}
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
@@ -451,12 +489,27 @@ func (c *Connection) receive() {
 			c.loggerOrDefault().Error("received message with neither id nor method", "raw", string(line))
 		}
 	}
+}
 
-	cause := errors.New("peer connection closed")
-	if err := scanner.Err(); err != nil {
-		cause = err
+func readJSONRPCLine(r *bufio.Reader, maxBytes int) ([]byte, error) {
+	var line []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		line = append(line, chunk...)
+		if len(line) > maxBytes {
+			return nil, fmt.Errorf("json-rpc message line exceeds %d bytes", maxBytes)
+		}
+		switch {
+		case err == nil:
+			return line, nil
+		case errors.Is(err, bufio.ErrBufferFull):
+			continue
+		case errors.Is(err, io.EOF) && len(line) > 0:
+			return line, nil
+		default:
+			return nil, err
+		}
 	}
-	c.shutdownReceive(cause)
 }
 
 func (c *Connection) shutdownReceive(cause error) {
@@ -738,7 +791,7 @@ func (c *Connection) sendCancelRequest(idKey string) {
 }
 
 func (c *Connection) waitForResponse(ctx context.Context, pr *pendingResponse, idKey string) (responseEnvelope, error) {
-	peerDisconnectedErr := NewInternalError(map[string]any{"error": "peer disconnected before response"})
+	peerDisconnectedErr := newInternalErrorWithCause(map[string]any{"error": "peer disconnected before response"}, ErrPeerDisconnected)
 
 	select {
 	case resp := <-pr.ch:
@@ -775,7 +828,7 @@ func (c *Connection) waitNotificationsUpTo(ctx context.Context, target uint64) e
 		return nil
 	}
 
-	peerDisconnectedErr := NewInternalError(map[string]any{"error": "peer disconnected while waiting for pre-response notifications"})
+	peerDisconnectedErr := newInternalErrorWithCause(map[string]any{"error": "peer disconnected while waiting for pre-response notifications"}, ErrPeerDisconnected)
 	stopWake := make(chan struct{})
 	defer close(stopWake)
 

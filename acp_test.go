@@ -117,6 +117,7 @@ type agentFuncs struct {
 	PromptFunc                 func(context.Context, PromptRequest) (PromptResponse, error)
 	CancelFunc                 func(context.Context, CancelNotification) error
 	CloseSessionFunc           func(context.Context, CloseSessionRequest) (CloseSessionResponse, error)
+	DeleteSessionFunc          func(context.Context, DeleteSessionRequest) (DeleteSessionResponse, error)
 	SetSessionModeFunc         func(ctx context.Context, params SetSessionModeRequest) (SetSessionModeResponse, error)
 	ListSessionsFunc           func(context.Context, ListSessionsRequest) (ListSessionsResponse, error)
 	ResumeSessionFunc          func(context.Context, ResumeSessionRequest) (ResumeSessionResponse, error)
@@ -136,7 +137,6 @@ type agentFuncs struct {
 	UnstableDisableProviderFunc   func(context.Context, UnstableDisableProviderRequest) (UnstableDisableProviderResponse, error)
 	UnstableListProvidersFunc     func(context.Context, UnstableListProvidersRequest) (UnstableListProvidersResponse, error)
 	UnstableSetProviderFunc       func(context.Context, UnstableSetProviderRequest) (UnstableSetProviderResponse, error)
-	UnstableDeleteSessionFunc     func(context.Context, UnstableDeleteSessionRequest) (UnstableDeleteSessionResponse, error)
 	UnstableForkSessionFunc       func(context.Context, UnstableForkSessionRequest) (UnstableForkSessionResponse, error)
 
 	HandleExtensionMethodFunc func(context.Context, string, json.RawMessage) (any, error)
@@ -337,11 +337,11 @@ func (a agentFuncs) UnstableSetProvider(ctx context.Context, params UnstableSetP
 	return UnstableSetProviderResponse{}, nil
 }
 
-func (a agentFuncs) UnstableDeleteSession(ctx context.Context, params UnstableDeleteSessionRequest) (UnstableDeleteSessionResponse, error) {
-	if a.UnstableDeleteSessionFunc != nil {
-		return a.UnstableDeleteSessionFunc(ctx, params)
+func (a agentFuncs) DeleteSession(ctx context.Context, params DeleteSessionRequest) (DeleteSessionResponse, error) {
+	if a.DeleteSessionFunc != nil {
+		return a.DeleteSessionFunc(ctx, params)
 	}
-	return UnstableDeleteSessionResponse{}, nil
+	return DeleteSessionResponse{}, nil
 }
 
 func (a agentFuncs) HandleExtensionMethod(ctx context.Context, method string, params json.RawMessage) (any, error) {
@@ -369,6 +369,10 @@ func (a *forkOnlyUnstableAgent) Cancel(context.Context, CancelNotification) erro
 
 func (a *forkOnlyUnstableAgent) CloseSession(context.Context, CloseSessionRequest) (CloseSessionResponse, error) {
 	return CloseSessionResponse{}, nil
+}
+
+func (a *forkOnlyUnstableAgent) DeleteSession(context.Context, DeleteSessionRequest) (DeleteSessionResponse, error) {
+	return DeleteSessionResponse{}, nil
 }
 
 func (a *forkOnlyUnstableAgent) Logout(context.Context, LogoutRequest) (LogoutResponse, error) {
@@ -872,7 +876,7 @@ func TestConnectionFailsFastOnNotificationQueueOverflow(t *testing.T) {
 	}
 
 	cause := context.Cause(c.ctx)
-	if !errors.Is(cause, errNotificationQueueOverflow) {
+	if !errors.Is(cause, ErrNotificationQueueOverflow) {
 		t.Fatalf("expected overflow cancellation cause, got %v", cause)
 	}
 
@@ -1264,6 +1268,10 @@ func (agentNoExtensions) CloseSession(ctx context.Context, params CloseSessionRe
 	return CloseSessionResponse{}, nil
 }
 
+func (agentNoExtensions) DeleteSession(ctx context.Context, params DeleteSessionRequest) (DeleteSessionResponse, error) {
+	return DeleteSessionResponse{}, nil
+}
+
 func (agentNoExtensions) NewSession(ctx context.Context, params NewSessionRequest) (NewSessionResponse, error) {
 	return NewSessionResponse{}, nil
 }
@@ -1384,6 +1392,69 @@ func TestExtensionMethods_UnknownNotification_DoesNotLog(t *testing.T) {
 
 	if strings.Contains(logBuf.String(), "failed to handle notification") {
 		t.Fatalf("unexpected notification error log: %s", logBuf.String())
+	}
+}
+
+func TestConnectionReceivesLargeSingleLineNotification(t *testing.T) {
+	_, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+
+	received := make(chan string, 1)
+	c := NewClientSideConnection(&clientFuncs{
+		SessionUpdateFunc: func(_ context.Context, n SessionNotification) error {
+			chunk := n.Update.AgentMessageChunk
+			if chunk == nil {
+				t.Fatalf("SessionUpdate.AgentMessageChunk is nil: %#v", n.Update)
+			}
+			text := chunk.Content.Text
+			if text == nil {
+				t.Fatalf("AgentMessageChunk.Content.Text is nil: %#v", chunk.Content)
+			}
+			received <- text.Text
+			return nil
+		},
+	}, c2aW, a2cR)
+
+	const oversizedBytes = 11 * 1024 * 1024
+	text := strings.Repeat("x", oversizedBytes)
+	frame := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  ClientMethodSessionUpdate,
+		"params": map[string]any{
+			"sessionId": "session-1",
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"content": map[string]any{
+					"type": "text",
+					"text": text,
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(frame)
+	if err != nil {
+		t.Fatalf("marshal frame: %v", err)
+	}
+	data = append(data, '\n')
+
+	writeErr := make(chan error, 1)
+	go func() {
+		_, err := a2cW.Write(data)
+		writeErr <- err
+	}()
+
+	select {
+	case got := <-received:
+		if len(got) != oversizedBytes {
+			t.Fatalf("received text length = %d, want %d", len(got), oversizedBytes)
+		}
+		if err := <-writeErr; err != nil {
+			t.Fatalf("write large frame: %v", err)
+		}
+	case <-c.Done():
+		t.Fatal("connection closed before receiving oversized notification")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for oversized notification")
 	}
 }
 

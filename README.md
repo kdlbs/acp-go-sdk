@@ -9,12 +9,28 @@ between code editors and AI‑powered coding agents.
 
 Learn more about the protocol itself at <https://agentclientprotocol.com>.
 
+## Versioning
+
+SDK releases and ACP schema artifacts have independent version numbers:
+
+- `sdk/version` contains the next Go SDK release version. SDK releases use tags
+  such as `v0.14.0`.
+- `schema/version` selects the published ACP schema artifact used to generate the
+  bindings. Schema assets are downloaded from releases such as
+  `schema-v1.20.0`.
+- The root `version` file is a generated-schema stamp. It matches
+  `schema/version`; it is not the SDK release version.
+
+Run `make update-schema SCHEMA_VERSION=1.20.0` to update generated protocol bindings.
+Run `make release VERSION=0.14.0` to prepare an SDK release without changing the
+selected ACP schema.
+
 ## Installation
 
-<!-- `$ printf 'go get github.com/coder/acp-go-sdk@v%s\n' "$(cat schema/version)"` as bash -->
+<!-- `$ printf 'go get github.com/coder/acp-go-sdk@v%s\n' "$(cat sdk/version)"` as bash -->
 
 ```bash
-go get github.com/coder/acp-go-sdk@v0.13.5
+go get github.com/coder/acp-go-sdk@v0.14.0
 ```
 
 ## Get Started
@@ -56,6 +72,11 @@ If you're building a [Client](https://agentclientprotocol.com/protocol/overview#
 - Launch or connect to your Agent process (stdio), then create a connection with
   `acp.NewClientSideConnection(client, stdin, stdout)`.
 - Call `Initialize`, `NewSession`, and `Prompt` to run a turn and stream updates.
+
+Connections accept options for transport-level behavior. For example,
+`acp.WithMaxQueuedNotifications(n)` sets the per-connection capacity of the
+inbound notification queue, while leaving outbound notifications and requests
+unchanged. Values less than or equal to zero use the default capacity.
 
 Helper constructors are provided to reduce boilerplate when working with union types:
 

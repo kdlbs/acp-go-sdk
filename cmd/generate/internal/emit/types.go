@@ -351,6 +351,13 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 				}
 				st = append(st, Id(field).Add(fieldType).Tag(map[string]string{"json": tag}))
 			}
+			if needsLegacyModelsField(name, def) {
+				st = append(
+					st,
+					Comment("kandev: LegacyModels accepts the pre-v0.13.5 models payload still emitted by legacy agents."),
+					Id("LegacyModels").Op("*").Id("LegacyModels").Tag(map[string]string{"json": "models,omitempty"}),
+				)
+			}
 			f.Type().Id(name).Struct(st...)
 			f.Line()
 
@@ -418,9 +425,9 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 		}
 
 		// validators for selected types
-		// Note: oneOf union wrappers get a generic Validate emitted in emitUnion,
+		// Note: union wrappers get a generic Validate emitted in emitUnion,
 		// so skip emitValidateJen for types that already have a union Validate.
-		hasUnionValidate := len(def.OneOf) > 0 && !isStringConstUnion(def)
+		hasUnionValidate := len(def.AnyOf) > 0 || (len(def.OneOf) > 0 && !isStringConstUnion(def))
 		if !hasUnionValidate && (strings.HasSuffix(name, "Request") || strings.HasSuffix(name, "Response") || strings.HasSuffix(name, "Notification") || name == "ToolCallUpdate") {
 			emitValidateJen(f, name, def)
 		}
@@ -522,6 +529,21 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 	return os.WriteFile(filepath.Join(outDir, "types_gen.go"), buf.Bytes(), 0o644)
 }
 
+// needsLegacyModelsField keeps the fork's read-only compatibility field in
+// generated session-creation responses. Keeping this in the generator ensures
+// that schema upgrades do not silently discard the compatibility shim.
+func needsLegacyModelsField(name string, def *load.Definition) bool {
+	if def == nil || def.Properties["models"] != nil {
+		return false
+	}
+	switch name {
+	case "NewSessionResponse", "LoadSessionResponse", "ForkSessionResponse", "UnstableForkSessionResponse":
+		return true
+	default:
+		return false
+	}
+}
+
 func isStringConstUnion(def *load.Definition) bool {
 	if def == nil || len(def.OneOf) == 0 {
 		return false
@@ -572,6 +594,146 @@ func isOpenStringEnum(def *load.Definition) bool {
 		}
 	}
 	return sawConst
+}
+
+func preservesUnevaluatedProperties(definition *load.Definition) bool {
+	return definition != nil && bytes.Equal(bytes.TrimSpace(definition.UnevaluatedProperties), []byte("true"))
+}
+
+func collectPropertyConstValues(definition *load.Definition, propertyName string) []string {
+	if definition == nil || propertyName == "" {
+		return nil
+	}
+	values := make(map[string]struct{})
+	var visit func(*load.Definition)
+	visit = func(current *load.Definition) {
+		if current == nil {
+			return
+		}
+		if property := current.Properties[propertyName]; property != nil {
+			if value, ok := property.Const.(string); ok {
+				values[value] = struct{}{}
+			}
+		}
+		for _, alternatives := range [][]*load.Definition{current.AnyOf, current.OneOf, current.AllOf} {
+			for _, alternative := range alternatives {
+				visit(alternative)
+			}
+		}
+	}
+	visit(definition)
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func emitOpenObjectJSONMethods(f *File, name string, properties map[string]*load.Definition) {
+	f.Func().Params(Id("v").Id(name)).Id("MarshalJSON").Params().Params(Index().Byte(), Error()).BlockFunc(func(g *Group) {
+		g.Type().Id("Alias").Id(name)
+		g.List(Id("base"), Id("err")).Op(":=").Qual("encoding/json", "Marshal").Call(Id("Alias").Call(Id("v")))
+		g.If(Id("err").Op("!=").Nil()).Block(Return(Nil(), Id("err")))
+		g.Var().Id("object").Map(String()).Qual("encoding/json", "RawMessage")
+		g.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("base"), Op("&").Id("object")), Id("err").Op("!=").Nil()).Block(Return(Nil(), Id("err")))
+		g.For(List(Id("key"), Id("value")).Op(":=").Range().Id("v").Dot("Extra")).Block(
+			If(List(Id("_"), Id("exists")).Op(":=").Id("object").Index(Id("key")), Op("!").Id("exists")).Block(
+				Id("object").Index(Id("key")).Op("=").Id("value"),
+			),
+		)
+		g.Return(Qual("encoding/json", "Marshal").Call(Id("object")))
+	})
+	f.Line()
+
+	knownProperties := make([]string, 0, len(properties))
+	for propertyName := range properties {
+		knownProperties = append(knownProperties, propertyName)
+	}
+	sort.Strings(knownProperties)
+	f.Func().Params(Id("v").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("data").Index().Byte()).Error().BlockFunc(func(g *Group) {
+		g.Type().Id("Alias").Id(name)
+		g.Var().Id("decoded").Id("Alias")
+		g.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("data"), Op("&").Id("decoded")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+		g.Var().Id("extra").Map(String()).Qual("encoding/json", "RawMessage")
+		g.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("data"), Op("&").Id("extra")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+		for _, propertyName := range knownProperties {
+			g.Id("delete").Call(Id("extra"), Lit(propertyName))
+		}
+		g.Op("*").Id("v").Op("=").Id(name).Call(Id("decoded"))
+		g.Id("v").Dot("Extra").Op("=").Id("extra")
+		g.Return(Nil())
+	})
+	f.Line()
+}
+
+func emitUnionVariantValidate(f *File, name string, schema *load.Schema, properties map[string]*load.Definition, required []string, discriminator string, reservedDiscriminatorValues []string) {
+	f.Func().Params(Id("v").Op("*").Id(name)).Id("Validate").Params().Error().BlockFunc(func(g *Group) {
+		for _, propertyName := range required {
+			property := properties[propertyName]
+			if property == nil {
+				continue
+			}
+			field := util.ToExportedField(propertyName)
+			resolved := resolveDefinition(schema, property)
+			switch ir.PrimaryType(resolved) {
+			case "string":
+				g.If(Id("v").Dot(field).Op("==").Lit("")).Block(
+					Return(Qual("fmt", "Errorf").Call(Lit(propertyName + " is required"))),
+				)
+			case "array":
+				g.If(Id("v").Dot(field).Op("==").Nil()).Block(
+					Return(Qual("fmt", "Errorf").Call(Lit(propertyName + " is required"))),
+				)
+			default:
+				if referencedDefinitionName(property) != "" && resolved != nil && (len(resolved.AnyOf) > 0 || (len(resolved.OneOf) > 0 && !isStringConstUnion(resolved))) {
+					g.If(Id("err").Op(":=").Id("v").Dot(field).Dot("Validate").Call(), Id("err").Op("!=").Nil()).Block(
+						Return(Qual("fmt", "Errorf").Call(Lit(propertyName+" is required: %w"), Id("err"))),
+					)
+				}
+			}
+		}
+		if discriminator != "" && len(reservedDiscriminatorValues) > 0 {
+			field := util.ToExportedField(discriminator)
+			g.Switch(Id("v").Dot(field)).BlockFunc(func(sw *Group) {
+				for _, value := range reservedDiscriminatorValues {
+					sw.Case(Lit(value)).Block(
+						Return(Qual("fmt", "Errorf").Call(Lit(discriminator+" %q is reserved"), Id("v").Dot(field))),
+					)
+				}
+			})
+		}
+		g.Return(Nil())
+	})
+	f.Line()
+}
+
+func referencedDefinitionName(definition *load.Definition) string {
+	if definition == nil {
+		return ""
+	}
+	if strings.HasPrefix(definition.Ref, "#/$defs/") {
+		return definition.Ref[len("#/$defs/"):]
+	}
+	if len(definition.AllOf) == 1 {
+		return referencedDefinitionName(definition.AllOf[0])
+	}
+	return ""
+}
+
+func resolveDefinition(schema *load.Schema, definition *load.Definition) *load.Definition {
+	if definition == nil {
+		return nil
+	}
+	if definition.Ref != "" && schema != nil && strings.HasPrefix(definition.Ref, "#/$defs/") {
+		if resolved := schema.Defs[definition.Ref[len("#/$defs/"):]]; resolved != nil {
+			return resolveDefinition(schema, resolved)
+		}
+	}
+	if len(definition.AllOf) == 1 && definition.AllOf[0] != nil {
+		return resolveDefinition(schema, definition.AllOf[0])
+	}
+	return definition
 }
 
 // emitValidateJen generates validators for selected types (logic unchanged).
@@ -747,6 +909,12 @@ func expandAllOf(schema *load.Schema, d *load.Definition) *load.Definition {
 		if len(merged.OneOf) == 0 && len(resolved.OneOf) > 0 {
 			merged.OneOf = resolved.OneOf
 		}
+		if merged.Not == nil && resolved.Not != nil {
+			merged.Not = resolved.Not
+		}
+		if len(merged.UnevaluatedProperties) == 0 && len(resolved.UnevaluatedProperties) > 0 {
+			merged.UnevaluatedProperties = resolved.UnevaluatedProperties
+		}
 
 		if len(resolved.Properties) > 0 {
 			if merged.Properties == nil {
@@ -769,6 +937,111 @@ func expandAllOf(schema *load.Schema, d *load.Definition) *load.Definition {
 	}
 
 	return &merged
+}
+
+type unionAlternative struct {
+	def        *load.Definition
+	ref        string
+	nameSuffix string
+}
+
+// expandUnionAlternatives expands object-valued nested anyOf composition into
+// concrete alternatives. JSON Schema commonly expresses a product such as
+// mode × scope by placing an anyOf inside an outer anyOf branch. Go union
+// wrappers need one concrete representation for each product member so no
+// flattened wire fields are discarded.
+func expandUnionAlternatives(schema *load.Schema, defs []*load.Definition) []unionAlternative {
+	var alternatives []unionAlternative
+	for _, raw := range defs {
+		if raw == nil {
+			continue
+		}
+		ref := directUnionAlternativeRef(raw)
+		expanded := expandAllOf(schema, raw)
+		if ir.PrimaryType(expanded) == "object" && len(expanded.AnyOf) > 0 {
+			base := *expanded
+			base.AnyOf = nil
+			flattened := false
+			for _, nestedRaw := range expanded.AnyOf {
+				if nestedRaw == nil {
+					continue
+				}
+				nested := expandAllOf(schema, nestedRaw)
+				if ir.PrimaryType(nested) != "object" {
+					continue
+				}
+				combined := mergeObjectDefinitions(&base, nested)
+				alternatives = append(alternatives, unionAlternative{
+					def:        combined,
+					nameSuffix: nestedUnionAlternativeSuffix(nestedRaw, nested),
+				})
+				flattened = true
+			}
+			if flattened {
+				continue
+			}
+		}
+		alternatives = append(alternatives, unionAlternative{def: expanded, ref: ref})
+	}
+	return alternatives
+}
+
+func directUnionAlternativeRef(d *load.Definition) string {
+	if d == nil {
+		return ""
+	}
+	if d.Ref != "" {
+		return d.Ref
+	}
+	if d.Type == nil && len(d.Properties) == 0 && len(d.Required) == 0 && len(d.Enum) == 0 &&
+		d.Items == nil && len(d.AnyOf) == 0 && len(d.OneOf) == 0 && len(d.AllOf) == 1 &&
+		d.AllOf[0] != nil && d.AllOf[0].Ref != "" {
+		return d.AllOf[0].Ref
+	}
+	return ""
+}
+
+func mergeObjectDefinitions(base, addition *load.Definition) *load.Definition {
+	merged := *base
+	merged.Properties = make(map[string]*load.Definition, len(base.Properties)+len(addition.Properties))
+	for name, property := range base.Properties {
+		merged.Properties[name] = property
+	}
+	for name, property := range addition.Properties {
+		merged.Properties[name] = property
+	}
+	merged.Required = mergeRequired(base.Required, addition.Required)
+	return &merged
+}
+
+func mergeRequired(groups ...[]string) []string {
+	seen := make(map[string]struct{})
+	var merged []string
+	for _, group := range groups {
+		for _, name := range group {
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			merged = append(merged, name)
+		}
+	}
+	sort.Strings(merged)
+	return merged
+}
+
+func nestedUnionAlternativeSuffix(raw, expanded *load.Definition) string {
+	if raw != nil && raw.Title != "" {
+		return util.ToExportedField(raw.Title)
+	}
+	if expanded != nil && expanded.Title != "" {
+		return util.ToExportedField(expanded.Title)
+	}
+	if expanded != nil && len(expanded.Required) == 1 {
+		name := util.ToExportedField(expanded.Required[0])
+		return strings.TrimSuffix(name, "Id")
+	}
+	return "Variant"
 }
 
 func jenTypeFor(d *load.Definition) Code {
@@ -907,9 +1180,11 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 		discValue         string
 		constPairs        [][2]string
 		isNull            bool
+		hasValidate       bool
 		description       string
 	}
 	variants := []variantInfo{}
+	alternatives := expandUnionAlternatives(schema, defs)
 	discKey := ""
 	// Use schema's explicit discriminator if available
 	if parentDef != nil && parentDef.Discriminator != nil {
@@ -918,11 +1193,11 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 	// Fallback: discover discriminator key by scanning for const properties
 	// (for backward compatibility with older schemas without discriminator metadata)
 	if discKey == "" {
-		for _, v := range defs {
+		for _, alternative := range alternatives {
+			v := alternative.def
 			if v == nil {
 				continue
 			}
-			v = expandAllOf(schema, v)
 			for k, pd := range v.Properties {
 				if pd != nil && pd.Const != nil {
 					discKey = k
@@ -935,37 +1210,24 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 		}
 	}
 	sharedProps := map[string]*load.Definition{}
-	sharedRequired := map[string]struct{}{}
 	if parentDef != nil {
 		for k, p := range parentDef.Properties {
 			sharedProps[k] = p
 		}
-		for _, r := range parentDef.Required {
-			sharedRequired[r] = struct{}{}
-		}
 	}
 
-	for idx, v := range defs {
+	for idx, alternative := range alternatives {
+		v := alternative.def
 		if v == nil {
 			continue
 		}
-		ref := v.Ref
-		// If this is an allOf wrapper around a single $ref with no additional structure, treat it
-		// as a $ref variant (keeps types stable and avoids duplicate structs).
-		if ref == "" &&
-			v.Type == nil &&
-			len(v.Properties) == 0 &&
-			len(v.Required) == 0 &&
-			len(v.Enum) == 0 &&
-			v.Items == nil &&
-			len(v.AnyOf) == 0 &&
-			len(v.OneOf) == 0 &&
-			len(v.AllOf) == 1 &&
-			v.AllOf[0] != nil &&
-			v.AllOf[0].Ref != "" {
-			ref = v.AllOf[0].Ref
+		ref := alternative.ref
+		// A referenced alternative cannot represent properties shared by the
+		// parent union. Emit a concrete composed struct instead of reusing the
+		// referenced type when shared wire fields exist.
+		if len(sharedProps) > 0 {
+			ref = ""
 		}
-		v = expandAllOf(schema, v)
 		// Detect null-only variant
 		isNull := false
 		if s, ok := v.Type.(string); ok && s == "null" {
@@ -977,7 +1239,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			tname = ref[len("#/$defs/"):]
 		} else if v.Title != "" {
 			// Scope inline variant titles to parent union name with smart naming
-			tname = generateNestedTypeName(name, v.Title, usedTypeNames)
+			tname = generateNestedTypeName(name, v.Title+alternative.nameSuffix, usedTypeNames)
 			// DEFENSIVE PROGRAMMING: Assert no collision before registering
 			if usedTypeNames[tname] {
 				panic(fmt.Sprintf("BUG: variant type name collision: %q already registered (parent: %q, title: %q)",
@@ -987,7 +1249,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 		} else {
 			if discKey != "" {
 				if pd := v.Properties[discKey]; pd != nil && pd.Const != nil {
-					s := fmt.Sprint(pd.Const)
+					s := fmt.Sprint(pd.Const) + alternative.nameSuffix
 					tname = generateNestedTypeName(name, s, usedTypeNames)
 					// DEFENSIVE PROGRAMMING: Assert no collision before registering
 					if usedTypeNames[tname] {
@@ -1018,14 +1280,14 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 		if discKey != "" {
 			if pd := v.Properties[discKey]; pd != nil && pd.Const != nil {
 				s := fmt.Sprint(pd.Const)
-				fieldName = util.ToExportedField(s)
+				fieldName = util.ToExportedField(s + alternative.nameSuffix)
 				dv = s
 			}
 		}
 
 		// Priority 2: Use original title if no discriminator (e.g., "stdio")
 		if fieldName == "" && v.Title != "" {
-			fieldName = util.ToExportedField(v.Title)
+			fieldName = util.ToExportedField(v.Title + alternative.nameSuffix)
 		}
 
 		// Priority 3: Fall back to type name
@@ -1062,6 +1324,19 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 				}
 			}
 		}
+		combinedRequired := v.Required
+		if parentDef != nil {
+			combinedRequired = mergeRequired(v.Required, parentDef.Required)
+		}
+		mergedVariantProps := make(map[string]*load.Definition, len(sharedProps)+len(v.Properties))
+		for propertyName, property := range sharedProps {
+			mergedVariantProps[propertyName] = property
+		}
+		for propertyName, property := range v.Properties {
+			mergedVariantProps[propertyName] = property
+		}
+		preserveUnknown := preservesUnevaluatedProperties(v)
+		reservedDiscriminatorValues := collectPropertyConstValues(v.Not, discKey)
 		// Emit struct for inline variants (non-$ref)
 		if (isObj || isNull || v.Title != "") && ref == "" {
 			// DEFENSIVE PROGRAMMING: Verify tname is registered before emitting
@@ -1072,21 +1347,11 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			st := []Code{}
 			if !isNull && isObj {
 				req := map[string]struct{}{}
-				for _, r := range v.Required {
+				for _, r := range combinedRequired {
 					req[r] = struct{}{}
 				}
-				for r := range sharedRequired {
-					req[r] = struct{}{}
-				}
-				mergedProps := make(map[string]*load.Definition, len(sharedProps)+len(v.Properties))
-				for pk, pDef := range sharedProps {
-					mergedProps[pk] = pDef
-				}
-				for pk, pDef := range v.Properties {
-					mergedProps[pk] = pDef
-				}
-				pkeys := make([]string, 0, len(mergedProps))
-				for pk := range mergedProps {
+				pkeys := make([]string, 0, len(mergedVariantProps))
+				for pk := range mergedVariantProps {
 					pkeys = append(pkeys, pk)
 				}
 				sort.Strings(pkeys)
@@ -1094,7 +1359,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 					emitDocComment(f, v.Description)
 				}
 				for _, pk := range pkeys {
-					pDef := mergedProps[pk]
+					pDef := mergedVariantProps[pk]
 					field := util.ToExportedField(pk)
 					if pDef.Description != "" {
 						st = appendDocComments(st, pDef.Description)
@@ -1104,6 +1369,13 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 						tag = pk + ",omitempty"
 					}
 					st = append(st, Id(field).Add(jenTypeForOptional(pDef)).Tag(map[string]string{"json": tag}))
+				}
+				if preserveUnknown {
+					st = append(
+						st,
+						Comment("Extra preserves unevaluated extension properties for round-trip forwarding."),
+						Id("Extra").Map(String()).Qual("encoding/json", "RawMessage").Tag(map[string]string{"json": "-"}),
+					)
 				}
 			} else if !isNull && !isObj && v.Title != "" {
 				// Title-only variants: check if they're extension types
@@ -1133,18 +1405,25 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			}
 			f.Type().Id(tname).Struct(st...)
 			f.Line()
+			if isObj {
+				if preserveUnknown {
+					emitOpenObjectJSONMethods(f, tname, mergedVariantProps)
+				}
+				emitUnionVariantValidate(f, tname, schema, mergedVariantProps, combinedRequired, discKey, reservedDiscriminatorValues)
+			}
 		skipStructEmit:
 		}
 		variants = append(variants, variantInfo{
 			fieldName:         fieldName,
 			typeName:          tname,
-			required:          v.Required,
+			required:          combinedRequired,
 			isObject:          isObj,
 			isArray:           isArray,
 			arrayItemRequired: arrayItemRequired,
 			discValue:         dv,
 			constPairs:        consts,
 			isNull:            isNull,
+			hasValidate:       isObj && ref == "",
 			description:       v.Description,
 		})
 	}
@@ -1156,10 +1435,46 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 		}
 		st = append(st, Id(vi.fieldName).Op("*").Id(vi.typeName).Tag(map[string]string{"json": "-"}))
 	}
+	st = append(st, Id("validationError").String().Tag(map[string]string{"json": "-"}))
 	f.Type().Id(name).Struct(st...)
 	f.Line()
+	emitObjectSelection := func(g *Group, candidates []variantInfo, zeroIsError bool) {
+		g.Var().Id("matchedVariant").Int().Op("=").Lit(-1)
+		g.Var().Id("matchCount").Int()
+		for idx, vi := range candidates {
+			g.BlockFunc(func(h *Group) {
+				h.Var().Id("match").Bool().Op("=").Lit(true)
+				for _, required := range vi.required {
+					h.If(List(Id("_"), Id("ok")).Op(":=").Id("m").Index(Lit(required)), Op("!").Id("ok")).Block(Id("match").Op("=").Lit(false))
+				}
+				h.If(Id("match")).Block(
+					Id("matchCount").Op("++"),
+					Id("matchedVariant").Op("=").Lit(idx),
+				)
+			})
+		}
+		g.If(Id("matchCount").Op(">").Lit(1)).Block(
+			Id("u").Dot("validationError").Op("=").Lit(name+" matches multiple union variants"),
+			Return(Nil()),
+		)
+		g.Switch(Id("matchedVariant")).BlockFunc(func(sw *Group) {
+			for idx, vi := range candidates {
+				sw.Case(Lit(idx)).Block(
+					Var().Id("v").Id(vi.typeName),
+					If(Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("v")).Op("!=").Nil()).Block(Return(Qual("errors", "New").Call(Lit("invalid variant payload")))),
+					Id("u").Dot(vi.fieldName).Op("=").Op("&").Id("v"),
+					Return(Nil()),
+				)
+			}
+		})
+		if zeroIsError {
+			g.Id("u").Dot("validationError").Op("=").Lit(name + " does not match a union variant")
+			g.Return(Nil())
+		}
+	}
 	// Unmarshal
 	f.Func().Params(Id("u").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("b").Index().Byte()).Error().BlockFunc(func(g *Group) {
+		g.Op("*").Id("u").Op("=").Id(name).Values()
 		// Handle literal null if a null-only variant exists
 		{
 			varNullHandled := false
@@ -1186,36 +1501,52 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 					h.If(List(Id("v"), Id("ok")).Op(":=").Id("m").Index(Lit(discKey)), Id("ok")).Block(
 						Qual("encoding/json", "Unmarshal").Call(Id("v"), Op("&").Id("disc")),
 					)
+					discGroups := make(map[string][]variantInfo)
+					for _, vi := range variants {
+						if vi.discValue != "" {
+							discGroups[vi.discValue] = append(discGroups[vi.discValue], vi)
+						}
+					}
+					discValues := make([]string, 0, len(discGroups))
+					for value := range discGroups {
+						discValues = append(discValues, value)
+					}
+					sort.Strings(discValues)
 					h.Switch(Id("disc")).BlockFunc(func(sw *Group) {
-						for _, vi := range variants {
-							if vi.discValue != "" {
-								sw.Case(Lit(vi.discValue)).Block(
+						for _, value := range discValues {
+							group := discGroups[value]
+							if len(group) == 1 {
+								vi := group[0]
+								sw.Case(Lit(value)).Block(
 									Var().Id("v").Id(vi.typeName),
 									If(Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("v")).Op("!=").Nil()).Block(Return(Qual("errors", "New").Call(Lit("invalid variant payload")))),
 									Id("u").Dot(vi.fieldName).Op("=").Op("&").Id("v"),
 									Return(Nil()),
 								)
+								continue
 							}
+							sw.Case(Lit(value)).BlockFunc(func(branch *Group) {
+								emitObjectSelection(branch, group, true)
+							})
 						}
 					})
 				})
 			}
-			// required-key match
+			// Match non-discriminated object variants as a group so overlapping
+			// required fields cannot silently select the first alternative.
+			var objectCandidates []variantInfo
+			hasUnkeyedObjectVariant := false
 			for _, vi := range variants {
-				if vi.isObject && len(vi.required) > 0 {
-					obj.BlockFunc(func(h *Group) {
-						h.Var().Id("v").Id(vi.typeName)
-						h.Var().Id("match").Bool().Op("=").Lit(true)
-						for _, rk := range vi.required {
-							h.If(List(Id("_"), Id("ok")).Op(":=").Id("m").Index(Lit(rk)), Op("!").Id("ok")).Block(Id("match").Op("=").Lit(false))
-						}
-						h.If(Id("match")).Block(
-							If(Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("v")).Op("!=").Nil()).Block(Return(Qual("errors", "New").Call(Lit("invalid variant payload")))),
-							Id("u").Dot(vi.fieldName).Op("=").Op("&").Id("v"),
-							Return(Nil()),
-						)
-					})
+				if vi.isObject && vi.discValue == "" && len(vi.required) > 0 {
+					objectCandidates = append(objectCandidates, vi)
+				} else if vi.isObject && vi.discValue == "" {
+					hasUnkeyedObjectVariant = true
 				}
+			}
+			if len(objectCandidates) > 0 {
+				obj.BlockFunc(func(h *Group) {
+					emitObjectSelection(h, objectCandidates, !hasUnkeyedObjectVariant)
+				})
 			}
 		}).Else().Block(
 			// Not an object (e.g., primitive union variant) or invalid JSON.
@@ -1355,18 +1686,28 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 	})
 	f.Line()
 
-	// Generic validator for oneOf unions: exactly one variant must be set
-	if exactlyOne {
-		f.Func().Params(Id("u").Op("*").Id(name)).Id("Validate").Params().Params(Error()).BlockFunc(func(g *Group) {
-			g.Var().Id("count").Int()
-			for _, vi := range variants {
-				g.If(Id("u").Dot(vi.fieldName).Op("!=").Nil()).Block(Id("count").Op("++"))
+	// The generated wrapper can represent one selected variant. Require one for
+	// both oneOf and anyOf schemas so request dispatch never accepts an empty
+	// wrapper and so every union exposes the Validate method expected by dispatch.
+	f.Func().Params(Id("u").Op("*").Id(name)).Id("Validate").Params().Params(Error()).BlockFunc(func(g *Group) {
+		g.If(Id("u").Dot("validationError").Op("!=").Lit("")).Block(
+			Return(Qual("errors", "New").Call(Id("u").Dot("validationError"))),
+		)
+		g.Var().Id("count").Int()
+		for _, vi := range variants {
+			g.If(Id("u").Dot(vi.fieldName).Op("!=").Nil()).Block(Id("count").Op("++"))
+		}
+		g.If(Id("count").Op("!=").Lit(1)).Block(
+			Return(Qual("errors", "New").Call(Lit(name + " must have exactly one variant set"))),
+		)
+		for _, vi := range variants {
+			if vi.hasValidate {
+				g.If(Id("u").Dot(vi.fieldName).Op("!=").Nil()).Block(
+					Return(Id("u").Dot(vi.fieldName).Dot("Validate").Call()),
+				)
 			}
-			g.If(Id("count").Op("!=").Lit(1)).Block(
-				Return(Qual("errors", "New").Call(Lit(name + " must have exactly one variant set"))),
-			)
-			g.Return(Nil())
-		})
-		f.Line()
-	}
+		}
+		g.Return(Nil())
+	})
+	f.Line()
 }
