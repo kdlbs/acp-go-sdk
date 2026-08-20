@@ -75,6 +75,17 @@ type cancelRequestParams struct {
 
 type MethodHandler func(ctx context.Context, method string, params json.RawMessage) (any, *RequestError)
 
+type inboundRequestContextKey struct{}
+
+func withInboundRequestContext(ctx context.Context, isRequest bool) context.Context {
+	return context.WithValue(ctx, inboundRequestContextKey{}, isRequest)
+}
+
+func isInboundRequest(ctx context.Context) bool {
+	isRequest, _ := ctx.Value(inboundRequestContextKey{}).(bool)
+	return isRequest
+}
+
 // Connection is a simple JSON-RPC 2.0 connection over line-delimited JSON.
 type Connection struct {
 	w       io.Writer
@@ -633,7 +644,8 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage) {
 		return
 	}
 
-	result, err := c.handler(ctx, req.Method, req.Params)
+	handlerCtx := withInboundRequestContext(ctx, req.ID != nil)
+	result, err := c.handler(handlerCtx, req.Method, req.Params)
 	if req.ID == nil {
 		// Notification: no response is sent; log handler errors to surface decode failures.
 		if err != nil {

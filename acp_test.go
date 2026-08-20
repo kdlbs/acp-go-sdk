@@ -1562,6 +1562,41 @@ func TestExtensionMethods_AgentToClientVendorRequest_DeclinedReturnsMethodNotFou
 	}
 }
 
+func TestExtensionMethods_AgentToClientVendorNotification_DoesNotReachExtensionHandler(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+
+	handlerCalled := make(chan struct{}, 1)
+
+	_ = NewClientSideConnection(&clientFuncs{
+		ReadTextFileFunc: func(context.Context, ReadTextFileRequest) (ReadTextFileResponse, error) {
+			return ReadTextFileResponse{Content: "ok"}, nil
+		},
+		HandleExtensionMethodFunc: func(context.Context, string, json.RawMessage) (any, error) {
+			handlerCalled <- struct{}{}
+			return nil, NewMethodNotFound("cursor/notify")
+		},
+	}, c2aW, a2cR)
+
+	ag := NewAgentSideConnection(agentFuncs{}, a2cW, c2aR)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := ag.conn.SendNotification(ctx, "cursor/notify", map[string]any{"msg": "hi"}); err != nil {
+		t.Fatalf("SendNotification: %v", err)
+	}
+	if _, err := ag.ReadTextFile(ctx, ReadTextFileRequest{Path: "/tmp/test.txt", SessionId: "test-session"}); err != nil {
+		t.Fatalf("ReadTextFile: %v", err)
+	}
+
+	select {
+	case <-handlerCalled:
+		t.Fatalf("vendor notification unexpectedly reached extension handler")
+	default:
+	}
+}
+
 func TestExtensionMethods_OutboundValidationRejectsVendorNames(t *testing.T) {
 	ctx := context.Background()
 	vendorMethod := "cursor/task"
