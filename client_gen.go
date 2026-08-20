@@ -7,6 +7,40 @@ import (
 	"encoding/json"
 )
 
+func (c *ClientSideConnection) isKnownMethod(method string) bool {
+	switch method {
+	case ClientMethodElicitationComplete:
+		return true
+	case ClientMethodElicitationCreate:
+		return true
+	case ClientMethodFsReadTextFile:
+		return true
+	case ClientMethodFsWriteTextFile:
+		return true
+	case ClientMethodMcpConnect:
+		return true
+	case ClientMethodMcpDisconnect:
+		return true
+	case ClientMethodMcpMessage:
+		return true
+	case ClientMethodSessionRequestPermission:
+		return true
+	case ClientMethodSessionUpdate:
+		return true
+	case ClientMethodTerminalCreate:
+		return true
+	case ClientMethodTerminalKill:
+		return true
+	case ClientMethodTerminalOutput:
+		return true
+	case ClientMethodTerminalRelease:
+		return true
+	case ClientMethodTerminalWaitForExit:
+		return true
+	default:
+		return false
+	}
+}
 func (c *ClientSideConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *RequestError) {
 	switch method {
 	case ClientMethodElicitationComplete:

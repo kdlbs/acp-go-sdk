@@ -51,19 +51,19 @@ func (a *AgentSideConnection) handleWithExtensions(ctx context.Context, method s
 }
 
 func (c *ClientSideConnection) handleWithExtensions(ctx context.Context, method string, params json.RawMessage) (any, *RequestError) {
-	if isExtensionMethodName(method) {
-		h, ok := c.client.(ExtensionMethodHandler)
-		if !ok {
-			return nil, NewMethodNotFound(method)
-		}
-		resp, err := h.HandleExtensionMethod(ctx, method, params)
-		if err != nil {
-			return nil, toReqErr(err)
-		}
-		return resp, nil
+	if c.isKnownMethod(method) {
+		return c.handle(ctx, method, params)
 	}
 
-	return c.handle(ctx, method, params)
+	h, ok := c.client.(ExtensionMethodHandler)
+	if !ok {
+		return nil, NewMethodNotFound(method)
+	}
+	resp, err := h.HandleExtensionMethod(ctx, method, params)
+	if err != nil {
+		return nil, toReqErr(err)
+	}
+	return resp, nil
 }
 
 // CallExtension sends an ACP extension-method request (method names starting with "_")

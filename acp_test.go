@@ -1494,3 +1494,91 @@ func TestExtensionMethods_AgentToClientRequest(t *testing.T) {
 		t.Fatalf("unexpected response: %#v", resp)
 	}
 }
+
+func TestExtensionMethods_AgentToClientVendorRequest(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+
+	method := "cursor/task"
+
+	_ = NewClientSideConnection(&clientFuncs{
+		HandleExtensionMethodFunc: func(ctx context.Context, gotMethod string, params json.RawMessage) (any, error) {
+			if gotMethod != method {
+				return nil, NewInternalError(map[string]any{"expected": method, "got": gotMethod})
+			}
+			var p extEchoParams
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, err
+			}
+			return extEchoResult{Msg: p.Msg}, nil
+		},
+	}, c2aW, a2cR)
+
+	ag := NewAgentSideConnection(agentFuncs{}, a2cW, c2aR)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	raw, err := SendRequest[json.RawMessage](ag.conn, ctx, method, extEchoParams{Msg: "hi"})
+	if err != nil {
+		t.Fatalf("SendRequest: %v", err)
+	}
+	var resp extEchoResult
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Msg != "hi" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestExtensionMethods_AgentToClientVendorRequest_DeclinedReturnsMethodNotFound(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+
+	method := "cursor/task"
+
+	_ = NewClientSideConnection(&clientFuncs{
+		HandleExtensionMethodFunc: func(_ context.Context, gotMethod string, _ json.RawMessage) (any, error) {
+			return nil, NewMethodNotFound(gotMethod)
+		},
+	}, c2aW, a2cR)
+
+	ag := NewAgentSideConnection(agentFuncs{}, a2cW, c2aR)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	_, err := SendRequest[json.RawMessage](ag.conn, ctx, method, extEchoParams{Msg: "hi"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	var re *RequestError
+	if !errors.As(err, &re) {
+		t.Fatalf("expected *RequestError, got %T: %v", err, err)
+	}
+	if re.Code != -32601 {
+		t.Fatalf("expected -32601 method not found, got %d", re.Code)
+	}
+}
+
+func TestExtensionMethods_OutboundValidationRejectsVendorNames(t *testing.T) {
+	ctx := context.Background()
+	vendorMethod := "cursor/task"
+
+	ag := &AgentSideConnection{}
+	if _, err := ag.CallExtension(ctx, vendorMethod, nil); err == nil {
+		t.Fatalf("expected CallExtension validation error")
+	}
+	if err := ag.NotifyExtension(ctx, vendorMethod, nil); err == nil {
+		t.Fatalf("expected NotifyExtension validation error")
+	}
+
+	client := &ClientSideConnection{}
+	if _, err := client.CallExtension(ctx, vendorMethod, nil); err == nil {
+		t.Fatalf("expected CallExtension validation error")
+	}
+	if err := client.NotifyExtension(ctx, vendorMethod, nil); err == nil {
+		t.Fatalf("expected NotifyExtension validation error")
+	}
+}
