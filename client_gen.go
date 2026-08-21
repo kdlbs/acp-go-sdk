@@ -7,6 +7,40 @@ import (
 	"encoding/json"
 )
 
+func (c *ClientSideConnection) isKnownMethod(method string) bool {
+	switch method {
+	case ClientMethodElicitationComplete:
+		return true
+	case ClientMethodElicitationCreate:
+		return true
+	case ClientMethodFsReadTextFile:
+		return true
+	case ClientMethodFsWriteTextFile:
+		return true
+	case ClientMethodMcpConnect:
+		return true
+	case ClientMethodMcpDisconnect:
+		return true
+	case ClientMethodMcpMessage:
+		return true
+	case ClientMethodSessionRequestPermission:
+		return true
+	case ClientMethodSessionUpdate:
+		return true
+	case ClientMethodTerminalCreate:
+		return true
+	case ClientMethodTerminalKill:
+		return true
+	case ClientMethodTerminalOutput:
+		return true
+	case ClientMethodTerminalRelease:
+		return true
+	case ClientMethodTerminalWaitForExit:
+		return true
+	default:
+		return false
+	}
+}
 func (c *ClientSideConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *RequestError) {
 	switch method {
 	case ClientMethodElicitationComplete:
@@ -268,8 +302,8 @@ func (c *ClientSideConnection) CloseSession(ctx context.Context, params CloseSes
 	resp, err := SendRequest[CloseSessionResponse](c.conn, ctx, AgentMethodSessionClose, params)
 	return resp, err
 }
-func (c *ClientSideConnection) UnstableDeleteSession(ctx context.Context, params UnstableDeleteSessionRequest) (UnstableDeleteSessionResponse, error) {
-	resp, err := SendRequest[UnstableDeleteSessionResponse](c.conn, ctx, AgentMethodSessionDelete, params)
+func (c *ClientSideConnection) DeleteSession(ctx context.Context, params DeleteSessionRequest) (DeleteSessionResponse, error) {
+	resp, err := SendRequest[DeleteSessionResponse](c.conn, ctx, AgentMethodSessionDelete, params)
 	return resp, err
 }
 func (c *ClientSideConnection) UnstableForkSession(ctx context.Context, params UnstableForkSessionRequest) (UnstableForkSessionResponse, error) {

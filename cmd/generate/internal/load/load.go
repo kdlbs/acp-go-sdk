@@ -42,11 +42,15 @@ type Definition struct {
 	AnyOf       []*Definition          `json:"anyOf"`
 	OneOf       []*Definition          `json:"oneOf"`
 	AllOf       []*Definition          `json:"allOf"`
-	DocsIgnore  bool                   `json:"x-docs-ignore"`
-	Title       string                 `json:"title"`
-	Const       any                    `json:"const"`
-	XSide       string                 `json:"x-side"`
-	XMethod     string                 `json:"x-method"`
+	Not         *Definition            `json:"not"`
+	// UnevaluatedProperties is retained so emitters can preserve open extension
+	// payloads when a schema explicitly opts into them.
+	UnevaluatedProperties json.RawMessage `json:"unevaluatedProperties"`
+	DocsIgnore            bool            `json:"x-docs-ignore"`
+	Title                 string          `json:"title"`
+	Const                 any             `json:"const"`
+	XSide                 string          `json:"x-side"`
+	XMethod               string          `json:"x-method"`
 	// Default holds the JSON Schema default value, when present.
 	// Used by generators to synthesize defaulting behavior.
 	Default any `json:"default"`

@@ -13,6 +13,12 @@ import (
 // They provide a stable namespace for custom functionality that is not part
 // of the core ACP spec.
 //
+// On the client side, inbound agent-to-client requests for otherwise
+// unrecognized methods may also be delegated here so clients can explicitly
+// opt into vendor request names outside ACP's underscore namespace.
+// Notifications do not use that broader fallback. Outbound CallExtension and
+// NotifyExtension remain restricted to underscore-prefixed ACP extension names.
+//
 // If the method is unrecognized, implementations should return NewMethodNotFound(method).
 //
 // See: https://agentclientprotocol.com/protocol/extensibility#extension-methods
@@ -51,19 +57,22 @@ func (a *AgentSideConnection) handleWithExtensions(ctx context.Context, method s
 }
 
 func (c *ClientSideConnection) handleWithExtensions(ctx context.Context, method string, params json.RawMessage) (any, *RequestError) {
-	if isExtensionMethodName(method) {
-		h, ok := c.client.(ExtensionMethodHandler)
-		if !ok {
-			return nil, NewMethodNotFound(method)
-		}
-		resp, err := h.HandleExtensionMethod(ctx, method, params)
-		if err != nil {
-			return nil, toReqErr(err)
-		}
-		return resp, nil
+	if c.isKnownMethod(method) {
+		return c.handle(ctx, method, params)
+	}
+	if !isInboundRequest(ctx) {
+		return c.handle(ctx, method, params)
 	}
 
-	return c.handle(ctx, method, params)
+	h, ok := c.client.(ExtensionMethodHandler)
+	if !ok {
+		return nil, NewMethodNotFound(method)
+	}
+	resp, err := h.HandleExtensionMethod(ctx, method, params)
+	if err != nil {
+		return nil, toReqErr(err)
+	}
+	return resp, nil
 }
 
 // CallExtension sends an ACP extension-method request (method names starting with "_")

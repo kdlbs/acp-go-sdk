@@ -203,6 +203,14 @@ func WriteDispatchJen(outDir string, schema *load.Schema, meta *load.Meta) error
 			cCases = append(cCases, Case(Id("ClientMethod"+toExportedConst(k))).Block(body...))
 		}
 	}
+	knownClientMethodCases := []Code{}
+	for _, k := range cmKeys {
+		knownClientMethodCases = append(knownClientMethodCases, Case(Id("ClientMethod"+toExportedConst(k))).Block(Return(Lit(true))))
+	}
+	knownClientMethodCases = append(knownClientMethodCases, Default().Block(Return(Lit(false))))
+	fClient.Func().Params(Id("c").Op("*").Id("ClientSideConnection")).Id("isKnownMethod").Params(Id("method").String()).Bool().
+		Block(Switch(Id("method")).Block(knownClientMethodCases...))
+
 	cCases = append(cCases, Default().Block(Return(Nil(), Id("NewMethodNotFound").Call(Id("method")))))
 	fClient.Func().Params(Id("c").Op("*").Id("ClientSideConnection")).Id("handle").Params(
 		Id("ctx").Qual("context", "Context"), Id("method").String(), Id("params").Qual("encoding/json", "RawMessage"),

@@ -386,6 +386,7 @@ func visitDefinition(root *Definition, fn func(*Definition)) {
 		for _, v := range d.AllOf {
 			walk(v)
 		}
+		walk(d.Not)
 	}
 	walk(root)
 }
@@ -409,6 +410,9 @@ func deepCopyDefinition(d *Definition) *Definition {
 	if d.Enum != nil {
 		copyDef.Enum = append([]any(nil), d.Enum...)
 	}
+	if d.UnevaluatedProperties != nil {
+		copyDef.UnevaluatedProperties = append([]byte(nil), d.UnevaluatedProperties...)
+	}
 	if d.Properties != nil {
 		copyDef.Properties = make(map[string]*Definition, len(d.Properties))
 		for k, v := range d.Properties {
@@ -416,6 +420,7 @@ func deepCopyDefinition(d *Definition) *Definition {
 		}
 	}
 	copyDef.Items = deepCopyDefinition(d.Items)
+	copyDef.Not = deepCopyDefinition(d.Not)
 	if d.AnyOf != nil {
 		copyDef.AnyOf = make([]*Definition, len(d.AnyOf))
 		for i, v := range d.AnyOf {
