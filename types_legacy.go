@@ -3,7 +3,8 @@ package acp
 import "context"
 
 // LegacyModels is the pre-v0.13.5 top-level "models" payload that some agents
-// (e.g. auggie 0.29.x) still emit on session/new and session/load responses.
+// (e.g. auggie 0.29.x) still emit on session responses. It is accepted on
+// session/new, session/load, session/resume, and session/fork responses.
 // Upstream removed it in v0.13.5 when model selection moved to
 // SessionConfigOption (category="model"). This shim restores read-only
 // parsing so consumers can fall back to the legacy surface when the new one

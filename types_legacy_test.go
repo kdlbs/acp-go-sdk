@@ -19,6 +19,7 @@ func TestLegacyModelsDecodeFromSessionResponses(t *testing.T) {
 	}`
 	var newSessionResponse NewSessionResponse
 	var loadSessionResponse LoadSessionResponse
+	var resumeSessionResponse ResumeSessionResponse
 	var forkSessionResponse UnstableForkSessionResponse
 
 	tests := []struct {
@@ -38,6 +39,13 @@ func TestLegacyModelsDecodeFromSessionResponses(t *testing.T) {
 			target: &loadSessionResponse,
 			models: func() *LegacyModels {
 				return loadSessionResponse.LegacyModels
+			},
+		},
+		{
+			name:   "resume session",
+			target: &resumeSessionResponse,
+			models: func() *LegacyModels {
+				return resumeSessionResponse.LegacyModels
 			},
 		},
 		{

@@ -4817,6 +4817,8 @@ type ResumeSessionResponse struct {
 	//
 	// See protocol docs: [Session Modes](https://agentclientprotocol.com/protocol/session-modes)
 	Modes *SessionModeState `json:"modes,omitempty"`
+	// kandev: LegacyModels accepts the pre-v0.13.5 models payload still emitted by legacy agents.
+	LegacyModels *LegacyModels `json:"models,omitempty"`
 }
 
 func (v *ResumeSessionResponse) Validate() error {

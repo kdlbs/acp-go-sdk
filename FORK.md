@@ -102,8 +102,8 @@ In `connection.go` / `errors.go`:
 
 - `ClientSideConnection.isKnownMethod` in `client_gen.go`
   (`cmd/generate/internal/emit/dispatch.go`).
-- The three `LegacyModels *LegacyModels` fields on `NewSessionResponse`,
-  `LoadSessionResponse`, and `UnstableForkSessionResponse`
+- The four `LegacyModels *LegacyModels` fields on `NewSessionResponse`,
+  `LoadSessionResponse`, `ResumeSessionResponse`, and `UnstableForkSessionResponse`
   (`needsLegacyModelsField` in `cmd/generate/internal/emit/types.go`).
 
 Do not hand-edit generated `_gen.go` files. If you need a new fork field or

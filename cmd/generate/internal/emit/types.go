@@ -530,14 +530,14 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 }
 
 // needsLegacyModelsField keeps the fork's read-only compatibility field in
-// generated session-creation responses. Keeping this in the generator ensures
-// that schema upgrades do not silently discard the compatibility shim.
+// generated session-creation and restoration responses. Keeping this in the
+// generator ensures schema upgrades do not silently discard the compatibility shim.
 func needsLegacyModelsField(name string, def *load.Definition) bool {
 	if def == nil || def.Properties["models"] != nil {
 		return false
 	}
 	switch name {
-	case "NewSessionResponse", "LoadSessionResponse", "ForkSessionResponse", "UnstableForkSessionResponse":
+	case "NewSessionResponse", "LoadSessionResponse", "ResumeSessionResponse", "ForkSessionResponse", "UnstableForkSessionResponse":
 		return true
 	default:
 		return false
