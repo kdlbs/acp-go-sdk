@@ -27,7 +27,8 @@ type clientFuncs struct {
 	TerminalOutputFunc      func(context.Context, TerminalOutputRequest) (TerminalOutputResponse, error)
 	WaitForTerminalExitFunc func(context.Context, WaitForTerminalExitRequest) (WaitForTerminalExitResponse, error)
 
-	HandleExtensionMethodFunc func(context.Context, string, json.RawMessage) (any, error)
+	HandleExtensionMethodFunc       func(context.Context, string, json.RawMessage) (any, error)
+	HandleExtensionNotificationFunc func(context.Context, string, json.RawMessage) error
 }
 
 var _ ExtensionMethodHandler = (*clientFuncs)(nil)
@@ -107,6 +108,13 @@ func (c clientFuncs) HandleExtensionMethod(ctx context.Context, method string, p
 		return c.HandleExtensionMethodFunc(ctx, method, params)
 	}
 	return nil, NewMethodNotFound(method)
+}
+
+func (c clientFuncs) HandleExtensionNotification(ctx context.Context, method string, params json.RawMessage) error {
+	if c.HandleExtensionNotificationFunc != nil {
+		return c.HandleExtensionNotificationFunc(ctx, method, params)
+	}
+	return nil
 }
 
 type agentFuncs struct {
@@ -1615,5 +1623,80 @@ func TestExtensionMethods_OutboundValidationRejectsVendorNames(t *testing.T) {
 	}
 	if err := client.NotifyExtension(ctx, vendorMethod, nil); err == nil {
 		t.Fatalf("expected NotifyExtension validation error")
+	}
+}
+
+func TestExtensionNotifications_AgentToClientReachesHandler(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+
+	type received struct {
+		method string
+		msg    string
+	}
+	got := make(chan received, 1)
+
+	_ = NewClientSideConnection(&clientFuncs{
+		HandleExtensionNotificationFunc: func(_ context.Context, method string, params json.RawMessage) error {
+			var p extEchoParams
+			if err := json.Unmarshal(params, &p); err != nil {
+				return err
+			}
+			got <- received{method: method, msg: p.Msg}
+			return nil
+		},
+	}, c2aW, a2cR)
+
+	ag := NewAgentSideConnection(agentFuncs{}, a2cW, c2aR)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := ag.NotifyExtension(ctx, "_vendor.test/notice", extEchoParams{Msg: "hi"}); err != nil {
+		t.Fatalf("NotifyExtension: %v", err)
+	}
+
+	select {
+	case r := <-got:
+		if r.method != "_vendor.test/notice" || r.msg != "hi" {
+			t.Fatalf("unexpected notification: %#v", r)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("extension notification did not reach the client handler")
+	}
+}
+
+func TestExtensionNotifications_VendorNameDoesNotReachHandler(t *testing.T) {
+	c2aR, c2aW := io.Pipe()
+	a2cR, a2cW := io.Pipe()
+
+	handlerCalled := make(chan struct{}, 1)
+
+	_ = NewClientSideConnection(&clientFuncs{
+		ReadTextFileFunc: func(context.Context, ReadTextFileRequest) (ReadTextFileResponse, error) {
+			return ReadTextFileResponse{Content: "ok"}, nil
+		},
+		HandleExtensionNotificationFunc: func(context.Context, string, json.RawMessage) error {
+			handlerCalled <- struct{}{}
+			return nil
+		},
+	}, c2aW, a2cR)
+
+	ag := NewAgentSideConnection(agentFuncs{}, a2cW, c2aR)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := ag.conn.SendNotification(ctx, "cursor/notify", map[string]any{"msg": "hi"}); err != nil {
+		t.Fatalf("SendNotification: %v", err)
+	}
+	if _, err := ag.ReadTextFile(ctx, ReadTextFileRequest{Path: "/tmp/test.txt", SessionId: "test-session"}); err != nil {
+		t.Fatalf("ReadTextFile: %v", err)
+	}
+
+	select {
+	case <-handlerCalled:
+		t.Fatal("vendor notification unexpectedly reached the extension notification handler")
+	default:
 	}
 }

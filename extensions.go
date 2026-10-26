@@ -26,6 +26,17 @@ type ExtensionMethodHandler interface {
 	HandleExtensionMethod(ctx context.Context, method string, params json.RawMessage) (any, error)
 }
 
+// ExtensionNotificationHandler can be implemented by a Client to receive
+// inbound ACP extension notifications: agent-to-client notifications whose
+// method names begin with "_". Notifications outside that namespace never
+// reach it. A client that does not implement it keeps ignoring extension
+// notifications, as ACP requires for unknown ones.
+//
+// See: https://agentclientprotocol.com/protocol/extensibility#extension-methods
+type ExtensionNotificationHandler interface {
+	HandleExtensionNotification(ctx context.Context, method string, params json.RawMessage) error
+}
+
 func validateExtensionMethodName(method string) error {
 	if method == "" {
 		return fmt.Errorf("extension method name must be non-empty")
@@ -61,6 +72,12 @@ func (c *ClientSideConnection) handleWithExtensions(ctx context.Context, method 
 		return c.handle(ctx, method, params)
 	}
 	if !isInboundRequest(ctx) {
+		if h, ok := c.client.(ExtensionNotificationHandler); ok && isExtensionMethodName(method) {
+			if err := h.HandleExtensionNotification(ctx, method, params); err != nil {
+				return nil, toReqErr(err)
+			}
+			return nil, nil
+		}
 		return c.handle(ctx, method, params)
 	}
 
