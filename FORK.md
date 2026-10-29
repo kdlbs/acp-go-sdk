@@ -85,7 +85,26 @@ In `connection.go` / `errors.go`:
 - `ErrPeerDisconnected` is exported and request errors wrap it, so callers can
   use `errors.Is(err, ErrPeerDisconnected)`.
 
-### 5. Schema 1.20 bindings and generator compatibility
+### 5. Remote response provenance for request errors
+
+In `errors.go` / `connection.go`:
+
+- `(*RequestError).IsRemoteResponse()` reports whether the error was decoded
+  from an accepted error envelope for a request this connection issued.
+- The marker is an unexported, nonserialized field set only in
+  `Connection.handleResponse`, for a correlated request id and an error-only
+  envelope. Local constructors, send failures, decode failures, expired
+  contexts, peer disconnects, unmatched replies, and contradictory
+  error/result envelopes leave it false.
+- Wire bytes are unchanged; no JSON field can set the marker.
+
+Kandev uses this to decide that a failed `session/prompt` came from the agent
+rather than from the local transport. Tests: `TestRemoteRequestErrorOrigin`,
+`TestLocalRequestErrorOrigin`,
+`TestRequestErrorOriginIgnoresUncorrelatedEnvelopes`, and
+`TestRequestErrorOriginNotOnWire` in `errors_origin_test.go`.
+
+### 6. Schema 1.20 bindings and generator compatibility
 
 - The stable and unstable Go bindings are regenerated from ACP schema 1.20.0
   (see `schema/version`, `sdk/version`).

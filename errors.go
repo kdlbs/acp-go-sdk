@@ -18,6 +18,19 @@ type RequestError struct {
 	Data    any    `json:"data,omitempty"`
 
 	cause error
+	// remoteResponse marks an error envelope accepted from the peer for a
+	// pending local request. It is never serialized and cannot be set from
+	// wire data because it is unexported.
+	remoteResponse bool
+}
+
+// IsRemoteResponse reports whether this error was decoded from an accepted
+// error response envelope for a request issued by this connection. Errors
+// produced locally (send failures, decoding failures, expired contexts, and
+// peer disconnects) return false even when their code and message look
+// identical to a remote reply.
+func (e *RequestError) IsRemoteResponse() bool {
+	return e != nil && e.remoteResponse
 }
 
 func (e *RequestError) Error() string {
