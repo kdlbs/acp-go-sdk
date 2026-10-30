@@ -2,7 +2,7 @@
 
 This repository is a fork of [`coder/acp-go-sdk`](https://github.com/coder/acp-go-sdk),
 maintained for [Kandev](https://github.com/kdlbs/kandev). Its bindings are
-generated from ACP schema 1.20.0, and it adds the changes below. Everything here
+generated from ACP schema 1.28.0, and it adds the changes below. Everything here
 exists because Kandev needs behavior that upstream does not provide; keep this
 file current when the fork's delta changes.
 
@@ -29,7 +29,7 @@ Upstream only routes underscore-prefixed (`_`) methods to
 
 The fork widens the seam **for inbound client requests only**:
 `ClientSideConnection.handleWithExtensions` now falls through to the client's
-`HandleExtensionMethod` for any method that is not a known stable method, as long
+`HandleExtensionMethod` for any method that is not a known protocol method, as long
 as it is a real inbound request. This is scoped deliberately:
 
 - Only the **client** side is widened; the agent side still requires `_`.
@@ -54,13 +54,14 @@ Files: `extensions.go`, `connection.go`, `client_gen.go`,
 Hand-written in `types_legacy.go` (with `types_legacy_test.go`):
 
 - `LegacyModels` / `LegacyModelInfo`: read-only parsing of the pre-`v0.13.5`
-  top-level `models` payload.
+  top-level `models` payload on new, load, resume, and fork responses.
 - `LegacyAgentMethodSessionSetModel` (`"session/set_model"`),
   `UnstableSetSessionModelRequest` / `UnstableSetSessionModelResponse`, and
   `ClientSideConnection.UnstableSetSessionModel(...)`: legacy model-selection
   wire method for unmigrated agents.
-- Compatibility type aliases: `AuthMethodId`, `MessageId`, `TerminalId`,
-  `DeleteSessionRequest`, `DeleteSessionResponse`.
+
+The generated `AuthMethodId`, `MessageId`, `TerminalId`, `DeleteSessionRequest`,
+and `DeleteSessionResponse` types retain their existing names.
 
 ### 3. Bounded inbound notification queue
 
@@ -104,26 +105,54 @@ rather than from the local transport. Tests: `TestRemoteRequestErrorOrigin`,
 `TestRequestErrorOriginIgnoresUncorrelatedEnvelopes`, and
 `TestRequestErrorOriginNotOnWire` in `errors_origin_test.go`.
 
-### 6. Schema 1.20 bindings and generator compatibility
+### 6. Schema 1.28 bindings and generator compatibility
 
-- The stable and unstable Go bindings are regenerated from ACP schema 1.20.0
+- The stable and unstable Go bindings are regenerated from ACP schema 1.28.0
   (see `schema/version`, `sdk/version`).
-- Stable `DeleteSession` replaces `UnstableDeleteSession`; the fork keeps
-  `DeleteSessionRequest` / `DeleteSessionResponse` aliases in `types_legacy.go`
-  for callers still on the unstable names.
 - The generator was taught the fork's compatibility fields, so a plain
   `make version` reproduces them (see below).
+- Elicitation is optional through `ClientElicitation`. Existing `Client`
+  implementations have no new required methods. Deprecated elicitation aliases,
+  connection methods, constructors, and handler dispatch remain available.
+
+The schema update removes upstream NES/document and `env_var` experiments.
+MCP-over-ACP uses the new request-scoped wire format. These changes are separate
+from the fork compatibility shims listed here. README.md describes their migration.
+
+### 7. Client extension notifications
+
+Clients can implement `ExtensionNotificationHandler` to receive agent notifications
+whose method names start with `_`. Other vendor notification names do not reach
+that handler. Known protocol methods retain their normal dispatch.
+
+Files: `extensions.go`. Tests: `TestExtensionNotifications_*` in `acp_test.go`.
+
+### 8. Notification ordering and cancellation backports
+
+The connection retains sequential notification processing and response-scoped
+notification barriers. Requests wait for notifications that precede their response.
+Later notifications do not delay an earlier response. Nested requests remain supported.
+
+Cancellation retains canonical JSON-RPC ID lookup, bounded cancellation queues,
+and distinct timeout, cancellation, and peer-disconnect errors.
+
+Tests: `connection_notification_barrier_test.go`, `connection_cancel_test.go`,
+`connection_queue_test.go`, and `errors_test.go`.
 
 ## Code generation is self-contained
 
 `cmd/generate` emits every fork-specific addition, so `make version` (or
-`go run ./cmd/generate`) reproduces the committed generated files with no drift:
+`cd cmd/generate && go run .`) reproduces the generated files:
 
 - `ClientSideConnection.isKnownMethod` in `client_gen.go`
   (`cmd/generate/internal/emit/dispatch.go`).
 - The four `LegacyModels *LegacyModels` fields on `NewSessionResponse`,
   `LoadSessionResponse`, `ResumeSessionResponse`, and `UnstableForkSessionResponse`
   (`needsLegacyModelsField` in `cmd/generate/internal/emit/types.go`).
+
+`TestGenerator_ForkCompatibility` checks these generated fields and the known-method
+guard against the current schema. Runtime tests verify legacy model decoding,
+model-selection requests, vendor requests, and extension notification dispatch.
 
 Do not hand-edit generated `_gen.go` files. If you need a new fork field or
 helper in a generated file, add it to the generator so it survives the next

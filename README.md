@@ -17,11 +17,11 @@ SDK releases and ACP schema artifacts have independent version numbers:
   such as `v0.14.0`.
 - `schema/version` selects the published ACP schema artifact used to generate the
   bindings. Schema assets are downloaded from releases such as
-  `schema-v1.20.0`.
+  `schema-v1.28.0`.
 - The root `version` file is a generated-schema stamp. It matches
   `schema/version`; it is not the SDK release version.
 
-Run `make update-schema SCHEMA_VERSION=1.20.0` to update generated protocol bindings.
+Run `make update-schema SCHEMA_VERSION=1.28.0` to update generated protocol bindings.
 Run `make release VERSION=0.14.0` to prepare an SDK release without changing the
 selected ACP schema.
 
@@ -84,6 +84,106 @@ Helper constructors are provided to reduce boilerplate when working with union t
   `acp.ResourceLinkBlock`, `acp.ResourceBlock`.
 - Tool content: `acp.ToolContent`, `acp.ToolDiffContent`, `acp.ToolTerminalRef`.
 - Utility: `acp.Ptr[T]` for pointer fields in request/update structs.
+
+### Protocol features in schema 1.28.0
+
+The SDK supports ACP protocol v1 with stable and experimental schema inputs.
+Protocol v2 remains a separate draft.
+
+Clients advertise support during initialization:
+
+```go
+capabilities := acp.ClientCapabilities{
+	Session: &acp.ClientSessionCapabilities{
+		Notices:    &acp.NoticeCapabilities{},
+		Compaction: &acp.CompactionCapabilities{},
+	},
+	Subagents: &acp.SubagentCapabilities{},
+}
+```
+
+Agents send notices and compaction events only after the client advertises
+the corresponding capability. Clients receive these events through `SessionUpdate`:
+
+- `Notice` contains a severity, title, and optional description.
+- `CompactionUpdate` tracks progress by `compactionId`.
+- `CompactionSummaryChunk` appends content to the compaction summary.
+
+Agent helpers include `UpdateNotice`, `UpdateCompaction`, and
+`UpdateCompactionSummary`. The agent and client examples demonstrate these events.
+
+#### Experimental subagents and messages
+
+Clients advertise `Subagents` before agents expose child sessions.
+An agent announces each child on its immediate parent session before it sends
+child traffic or messages that identify the child.
+
+```go
+update := acp.UpdateSubagent("child-session")
+update.SubagentUpdate.Title = acp.OptionalValue("Reviewer")
+update.SubagentUpdate.Cwd = acp.OptionalValue("/workspace/review")
+update.SubagentUpdate.State = acp.OptionalValue(acp.NewStateUpdateRunning())
+```
+
+Child events use the same connection. Clients do not need to load or subscribe
+to the child session. `UpdateSessionMessage` and `UpdateSessionMessageChunk`
+describe messages between sessions. Message upserts carry participant IDs and
+references. Chunks carry content and a message ID.
+
+Compaction, subagent, and message patches use `Optional[T]`:
+
+- A zero value omits the field and keeps the stored value.
+- `OptionalValue(value)` replaces the stored value.
+- `OptionalNull[T]()` clears the stored value.
+- `IsSet`, `IsNull`, and `Get` expose the decoded field state.
+
+An empty slice replaces a list with an empty list. A `null` value clears it.
+Subagent state is a complete snapshot. An idle child remains available for reuse.
+Child mutations require explicit capabilities in that child's association.
+
+#### Experimental system prompts
+
+Agents advertise `AgentCapabilities.SessionCapabilities.SystemPrompt`.
+Clients can then supply `SystemPrompt` on new, load, resume, and fork requests.
+Append mode extends the agent's instructions. Override mode requires an
+additional advertised capability.
+
+```go
+prompt := acp.SystemPromptText(acp.SystemPromptModeAppend, "Review changes before editing.")
+request := acp.NewSessionRequest{
+	Cwd:          "/workspace",
+	McpServers:   []acp.McpServer{},
+	SystemPrompt: &prompt,
+}
+```
+
+The experimental fork API uses `UnstableSystemPrompt` and its corresponding
+content types. Agents must reject unsupported system prompts.
+
+#### Elicitation and MCP migration
+
+Elicitation, terminal authentication, and tool names are stable in this schema.
+`WithStartName` and `WithUpdateName` set programmatic tool names.
+
+Clients implement the optional `ClientElicitation` interface and advertise
+`ClientCapabilities.Elicitation` for structured forms or URL input.
+The base `Client` interface has no new required methods.
+The old `Unstable*Elicitation*` types, constructors, and connection methods remain
+available as deprecated aliases or wrappers. Dispatch also accepts legacy handlers.
+
+Experimental MCP-over-ACP now uses request-scoped messages:
+
+- `UnstableMessageMcpRequest` identifies a declared server with `ServerId` and
+  an active inner request with `RequestId`.
+- `AgentSideConnection.UnstableMessageMcp` sends requests to the client.
+- `ClientSideConnection.UnstableMessageMcp` sends notifications to the agent.
+- Responses contain either `Result` or `Error`. A result can contain JSON `null`.
+- Opaque MCP payload numbers use `json.Number` to preserve precision.
+- `mcp/connect`, `mcp/disconnect`, and `connectionId` no longer apply.
+
+Next Edit Suggestions, their document notifications, and `env_var` authentication
+are absent from the new upstream schema. Their experimental Go APIs are removed.
+The existing legacy model compatibility API remains available.
 
 ### Extension methods
 

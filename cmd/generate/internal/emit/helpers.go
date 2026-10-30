@@ -3,6 +3,7 @@ package emit
 import (
 	"bytes"
 	"fmt"
+	"go/token"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,6 +38,7 @@ func WriteHelpersJen(outDir string, schema *load.Schema, _ *load.Meta) error {
 		if def == nil || def.DocsIgnore {
 			continue
 		}
+		def = flattenOptionalObjectUnion(schema, def)
 		unionDefs := def.OneOf
 		if len(unionDefs) == 0 {
 			unionDefs = def.AnyOf
@@ -164,6 +166,9 @@ func WriteHelpersJen(outDir string, schema *load.Schema, _ *load.Meta) error {
 				}
 				// build param using lower-cased name
 				pname := rk
+				if token.Lookup(pname).IsKeyword() || pname == "error" {
+					pname += "Value"
+				}
 				// field id for struct literal
 				field := util.ToExportedField(rk)
 				params = append(params, Id(pname).Add(jenTypeFor(pd)))

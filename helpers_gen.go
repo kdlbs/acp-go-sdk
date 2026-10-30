@@ -2,16 +2,6 @@
 
 package acp
 
-// NewAuthMethodEnvVar constructs a AuthMethod using the 'env_var' variant.
-func NewAuthMethodEnvVar(id AuthMethodId, name string, vars []AuthEnvVar) AuthMethod {
-	return AuthMethod{EnvVar: &AuthMethodEnvVarInline{
-		Id:   id,
-		Name: name,
-		Type: "env_var",
-		Vars: vars,
-	}}
-}
-
 // NewAuthMethodTerminal constructs a AuthMethod using the 'terminal' variant.
 func NewAuthMethodTerminal(id AuthMethodId, name string) AuthMethod {
 	return AuthMethod{Terminal: &AuthMethodTerminalInline{
@@ -32,6 +22,153 @@ func NewAuthMethodAgent(id AuthMethodId, name string) AuthMethod {
 // NewAvailableCommandInputUnstructured constructs a AvailableCommandInput using the ” variant.
 func NewAvailableCommandInputUnstructured(hint string) AvailableCommandInput {
 	return AvailableCommandInput{Unstructured: &UnstructuredCommandInput{Hint: hint}}
+}
+
+// NewCreateElicitationRequestFormSession constructs a CreateElicitationRequest using the 'form' variant.
+func NewCreateElicitationRequestFormSession(message string, requestedSchema ElicitationSchema, sessionId SessionId) CreateElicitationRequest {
+	return CreateElicitationRequest{FormSession: &CreateElicitationFormSession{
+		Message:         message,
+		Mode:            "form",
+		RequestedSchema: requestedSchema,
+		SessionId:       sessionId,
+	}}
+}
+
+// NewCreateElicitationRequestFormRequest constructs a CreateElicitationRequest using the 'form' variant.
+func NewCreateElicitationRequestFormRequest(message string, requestId RequestId, requestedSchema ElicitationSchema) CreateElicitationRequest {
+	return CreateElicitationRequest{FormRequest: &CreateElicitationFormRequest{
+		Message:         message,
+		Mode:            "form",
+		RequestId:       requestId,
+		RequestedSchema: requestedSchema,
+	}}
+}
+
+// NewCreateElicitationRequestUrlSession constructs a CreateElicitationRequest using the 'url' variant.
+func NewCreateElicitationRequestUrlSession(elicitationId ElicitationId, message string, sessionId SessionId, url string) CreateElicitationRequest {
+	return CreateElicitationRequest{UrlSession: &CreateElicitationUrlSession{
+		ElicitationId: elicitationId,
+		Message:       message,
+		Mode:          "url",
+		SessionId:     sessionId,
+		Url:           url,
+	}}
+}
+
+// NewCreateElicitationRequestUrlRequest constructs a CreateElicitationRequest using the 'url' variant.
+func NewCreateElicitationRequestUrlRequest(elicitationId ElicitationId, message string, requestId RequestId, url string) CreateElicitationRequest {
+	return CreateElicitationRequest{UrlRequest: &CreateElicitationUrlRequest{
+		ElicitationId: elicitationId,
+		Message:       message,
+		Mode:          "url",
+		RequestId:     requestId,
+		Url:           url,
+	}}
+}
+
+// NewCreateElicitationRequestOtherSession constructs a CreateElicitationRequest using the ” variant.
+func NewCreateElicitationRequestOtherSession(message string, mode string, sessionId SessionId) CreateElicitationRequest {
+	return CreateElicitationRequest{OtherSession: &CreateElicitationOtherSession{
+		Message:   message,
+		Mode:      mode,
+		SessionId: sessionId,
+	}}
+}
+
+// NewCreateElicitationRequestOtherRequest constructs a CreateElicitationRequest using the ” variant.
+func NewCreateElicitationRequestOtherRequest(message string, mode string, requestId RequestId) CreateElicitationRequest {
+	return CreateElicitationRequest{OtherRequest: &CreateElicitationOtherRequest{
+		Message:   message,
+		Mode:      mode,
+		RequestId: requestId,
+	}}
+}
+
+// NewCreateElicitationResponseAccept constructs a CreateElicitationResponse using the 'accept' variant.
+func NewCreateElicitationResponseAccept() CreateElicitationResponse {
+	return CreateElicitationResponse{Accept: &CreateElicitationAccept{Action: "accept"}}
+}
+
+// NewCreateElicitationResponseDecline constructs a CreateElicitationResponse using the 'decline' variant.
+func NewCreateElicitationResponseDecline() CreateElicitationResponse {
+	return CreateElicitationResponse{Decline: &CreateElicitationDecline{Action: "decline"}}
+}
+
+// NewCreateElicitationResponseCancel constructs a CreateElicitationResponse using the 'cancel' variant.
+func NewCreateElicitationResponseCancel() CreateElicitationResponse {
+	return CreateElicitationResponse{Cancel: &CreateElicitationCancel{Action: "cancel"}}
+}
+
+// NewCreateElicitationResponseOther constructs a CreateElicitationResponse using the ” variant.
+func NewCreateElicitationResponseOther(action string) CreateElicitationResponse {
+	return CreateElicitationResponse{Other: &CreateElicitationOther{Action: action}}
+}
+
+// NewElicitationFormModeSession constructs a ElicitationFormMode using the ” variant.
+func NewElicitationFormModeSession(requestedSchema ElicitationSchema, sessionId SessionId) ElicitationFormMode {
+	return ElicitationFormMode{Session: &ElicitationFormModeSession{
+		RequestedSchema: requestedSchema,
+		SessionId:       sessionId,
+	}}
+}
+
+// NewElicitationFormModeRequest constructs a ElicitationFormMode using the ” variant.
+func NewElicitationFormModeRequest(requestId RequestId, requestedSchema ElicitationSchema) ElicitationFormMode {
+	return ElicitationFormMode{Request: &ElicitationFormModeRequest{
+		RequestId:       requestId,
+		RequestedSchema: requestedSchema,
+	}}
+}
+
+// NewElicitationPropertySchemaString constructs a ElicitationPropertySchema using the 'string' variant.
+func NewElicitationPropertySchemaString() ElicitationPropertySchema {
+	return ElicitationPropertySchema{String: &ElicitationPropertySchemaString{Type: "string"}}
+}
+
+// NewElicitationPropertySchemaNumber constructs a ElicitationPropertySchema using the 'number' variant.
+func NewElicitationPropertySchemaNumber() ElicitationPropertySchema {
+	return ElicitationPropertySchema{Number: &ElicitationPropertySchemaNumber{Type: "number"}}
+}
+
+// NewElicitationPropertySchemaInteger constructs a ElicitationPropertySchema using the 'integer' variant.
+func NewElicitationPropertySchemaInteger() ElicitationPropertySchema {
+	return ElicitationPropertySchema{Integer: &ElicitationPropertySchemaInteger{Type: "integer"}}
+}
+
+// NewElicitationPropertySchemaBoolean constructs a ElicitationPropertySchema using the 'boolean' variant.
+func NewElicitationPropertySchemaBoolean() ElicitationPropertySchema {
+	return ElicitationPropertySchema{Boolean: &ElicitationPropertySchemaBoolean{Type: "boolean"}}
+}
+
+// NewElicitationPropertySchemaArray constructs a ElicitationPropertySchema using the 'array' variant.
+func NewElicitationPropertySchemaArray(items MultiSelectItems) ElicitationPropertySchema {
+	return ElicitationPropertySchema{Array: &ElicitationPropertySchemaArray{
+		Items: items,
+		Type:  "array",
+	}}
+}
+
+// NewElicitationPropertySchemaOther constructs a ElicitationPropertySchema using the ” variant.
+func NewElicitationPropertySchemaOther(typeValue string) ElicitationPropertySchema {
+	return ElicitationPropertySchema{Other: &ElicitationPropertySchemaOther{Type: typeValue}}
+}
+
+// NewElicitationUrlModeSession constructs a ElicitationUrlMode using the ” variant.
+func NewElicitationUrlModeSession(elicitationId ElicitationId, sessionId SessionId, url string) ElicitationUrlMode {
+	return ElicitationUrlMode{Session: &ElicitationUrlModeSession{
+		ElicitationId: elicitationId,
+		SessionId:     sessionId,
+		Url:           url,
+	}}
+}
+
+// NewElicitationUrlModeRequest constructs a ElicitationUrlMode using the ” variant.
+func NewElicitationUrlModeRequest(elicitationId ElicitationId, requestId RequestId, url string) ElicitationUrlMode {
+	return ElicitationUrlMode{Request: &ElicitationUrlModeRequest{
+		ElicitationId: elicitationId,
+		RequestId:     requestId,
+		Url:           url,
+	}}
 }
 
 // NewEmbeddedResourceResourceTextResourceContents constructs a EmbeddedResourceResource using the ” variant.
@@ -87,6 +224,24 @@ func NewMcpServerStdio(args []string, command string, env []EnvVariable, name st
 		Env:     env,
 		Name:    name,
 	}}
+}
+
+// NewMultiSelectItemsString constructs a MultiSelectItems using the 'string' variant.
+func NewMultiSelectItemsString(enum []string) MultiSelectItems {
+	return MultiSelectItems{String: &MultiSelectItemsString{
+		Enum: enum,
+		Type: "string",
+	}}
+}
+
+// NewMultiSelectItemsOther constructs a MultiSelectItems using the ” variant.
+func NewMultiSelectItemsOther(typeValue string) MultiSelectItems {
+	return MultiSelectItems{Other: &MultiSelectItemsOther{Type: typeValue}}
+}
+
+// NewMultiSelectItemsTitled constructs a MultiSelectItems using the ” variant.
+func NewMultiSelectItemsTitled(anyOf []EnumOption) MultiSelectItems {
+	return MultiSelectItems{Titled: &TitledMultiSelectItems{AnyOf: anyOf}}
 }
 
 // NewPlanUpdateContentItems constructs a PlanUpdateContent using the 'items' variant.
@@ -169,123 +324,93 @@ func NewSetSessionConfigOptionRequestValueId(configId SessionConfigId, sessionId
 	}}
 }
 
-// NewUnstableCreateElicitationRequestFormSession constructs a UnstableCreateElicitationRequest using the 'form' variant.
-func NewUnstableCreateElicitationRequestFormSession(message string, requestedSchema UnstableElicitationSchema, sessionId SessionId) UnstableCreateElicitationRequest {
-	return UnstableCreateElicitationRequest{FormSession: &UnstableCreateElicitationFormSession{
-		Message:         message,
-		Mode:            "form",
-		RequestedSchema: requestedSchema,
-		SessionId:       sessionId,
+// NewStateUpdateRunning constructs a StateUpdate using the 'running' variant.
+func NewStateUpdateRunning() StateUpdate {
+	return StateUpdate{Running: &StateUpdateRunning{State: "running"}}
+}
+
+// NewStateUpdateIdle constructs a StateUpdate using the 'idle' variant.
+func NewStateUpdateIdle() StateUpdate {
+	return StateUpdate{Idle: &StateUpdateIdle{State: "idle"}}
+}
+
+// NewStateUpdateRequiresAction constructs a StateUpdate using the 'requires_action' variant.
+func NewStateUpdateRequiresAction() StateUpdate {
+	return StateUpdate{RequiresAction: &StateUpdateRequiresAction{State: "requires_action"}}
+}
+
+// NewStateUpdateUnknown constructs a StateUpdate using the 'unknown' variant.
+func NewStateUpdateUnknown() StateUpdate {
+	return StateUpdate{Unknown: &StateUpdateUnknown{State: "unknown"}}
+}
+
+// NewStateUpdateOther constructs a StateUpdate using the ” variant.
+func NewStateUpdateOther(state string) StateUpdate {
+	return StateUpdate{Other: &StateUpdateOther{State: state}}
+}
+
+// NewUnstableContentBlockText constructs a UnstableContentBlock using the 'text' variant.
+func NewUnstableContentBlockText(text string) UnstableContentBlock {
+	return UnstableContentBlock{Text: &UnstableContentBlockText{
+		Text: text,
+		Type: "text",
 	}}
 }
 
-// NewUnstableCreateElicitationRequestFormRequest constructs a UnstableCreateElicitationRequest using the 'form' variant.
-func NewUnstableCreateElicitationRequestFormRequest(message string, requestId RequestId, requestedSchema UnstableElicitationSchema) UnstableCreateElicitationRequest {
-	return UnstableCreateElicitationRequest{FormRequest: &UnstableCreateElicitationFormRequest{
-		Message:         message,
-		Mode:            "form",
-		RequestId:       requestId,
-		RequestedSchema: requestedSchema,
+// NewUnstableContentBlockImage constructs a UnstableContentBlock using the 'image' variant.
+func NewUnstableContentBlockImage(data string, mimeType string) UnstableContentBlock {
+	return UnstableContentBlock{Image: &UnstableContentBlockImage{
+		Data:     data,
+		MimeType: mimeType,
+		Type:     "image",
 	}}
 }
 
-// NewUnstableCreateElicitationRequestUrlSession constructs a UnstableCreateElicitationRequest using the 'url' variant.
-func NewUnstableCreateElicitationRequestUrlSession(elicitationId UnstableElicitationId, message string, sessionId SessionId, url string) UnstableCreateElicitationRequest {
-	return UnstableCreateElicitationRequest{UrlSession: &UnstableCreateElicitationUrlSession{
-		ElicitationId: elicitationId,
-		Message:       message,
-		Mode:          "url",
-		SessionId:     sessionId,
-		Url:           url,
+// NewUnstableContentBlockAudio constructs a UnstableContentBlock using the 'audio' variant.
+func NewUnstableContentBlockAudio(data string, mimeType string) UnstableContentBlock {
+	return UnstableContentBlock{Audio: &UnstableContentBlockAudio{
+		Data:     data,
+		MimeType: mimeType,
+		Type:     "audio",
 	}}
 }
 
-// NewUnstableCreateElicitationRequestUrlRequest constructs a UnstableCreateElicitationRequest using the 'url' variant.
-func NewUnstableCreateElicitationRequestUrlRequest(elicitationId UnstableElicitationId, message string, requestId RequestId, url string) UnstableCreateElicitationRequest {
-	return UnstableCreateElicitationRequest{UrlRequest: &UnstableCreateElicitationUrlRequest{
-		ElicitationId: elicitationId,
-		Message:       message,
-		Mode:          "url",
-		RequestId:     requestId,
-		Url:           url,
+// NewUnstableContentBlockResourceLink constructs a UnstableContentBlock using the 'resource_link' variant.
+func NewUnstableContentBlockResourceLink(name string, uri string) UnstableContentBlock {
+	return UnstableContentBlock{ResourceLink: &UnstableContentBlockResourceLink{
+		Name: name,
+		Type: "resource_link",
+		Uri:  uri,
 	}}
 }
 
-// NewUnstableCreateElicitationRequestOtherSession constructs a UnstableCreateElicitationRequest using the ” variant.
-func NewUnstableCreateElicitationRequestOtherSession(message string, mode string, sessionId SessionId) UnstableCreateElicitationRequest {
-	return UnstableCreateElicitationRequest{OtherSession: &UnstableCreateElicitationOtherSession{
-		Message:   message,
-		Mode:      mode,
-		SessionId: sessionId,
+// NewUnstableContentBlockResource constructs a UnstableContentBlock using the 'resource' variant.
+func NewUnstableContentBlockResource(resource UnstableEmbeddedResourceResource) UnstableContentBlock {
+	return UnstableContentBlock{Resource: &UnstableContentBlockResource{
+		Resource: resource,
+		Type:     "resource",
 	}}
 }
 
-// NewUnstableCreateElicitationRequestOtherRequest constructs a UnstableCreateElicitationRequest using the ” variant.
-func NewUnstableCreateElicitationRequestOtherRequest(message string, mode string, requestId RequestId) UnstableCreateElicitationRequest {
-	return UnstableCreateElicitationRequest{OtherRequest: &UnstableCreateElicitationOtherRequest{
-		Message:   message,
-		Mode:      mode,
-		RequestId: requestId,
+// NewUnstableEmbeddedResourceResourceTextResourceContents constructs a UnstableEmbeddedResourceResource using the ” variant.
+func NewUnstableEmbeddedResourceResourceTextResourceContents(text string, uri string) UnstableEmbeddedResourceResource {
+	return UnstableEmbeddedResourceResource{TextResourceContents: &UnstableTextResourceContents{
+		Text: text,
+		Uri:  uri,
 	}}
 }
 
-// NewUnstableCreateElicitationResponseAccept constructs a UnstableCreateElicitationResponse using the 'accept' variant.
-func NewUnstableCreateElicitationResponseAccept() UnstableCreateElicitationResponse {
-	return UnstableCreateElicitationResponse{Accept: &UnstableCreateElicitationAccept{Action: "accept"}}
-}
-
-// NewUnstableCreateElicitationResponseDecline constructs a UnstableCreateElicitationResponse using the 'decline' variant.
-func NewUnstableCreateElicitationResponseDecline() UnstableCreateElicitationResponse {
-	return UnstableCreateElicitationResponse{Decline: &UnstableCreateElicitationDecline{Action: "decline"}}
-}
-
-// NewUnstableCreateElicitationResponseCancel constructs a UnstableCreateElicitationResponse using the 'cancel' variant.
-func NewUnstableCreateElicitationResponseCancel() UnstableCreateElicitationResponse {
-	return UnstableCreateElicitationResponse{Cancel: &UnstableCreateElicitationCancel{Action: "cancel"}}
-}
-
-// NewUnstableCreateElicitationResponseOther constructs a UnstableCreateElicitationResponse using the ” variant.
-func NewUnstableCreateElicitationResponseOther(action string) UnstableCreateElicitationResponse {
-	return UnstableCreateElicitationResponse{Other: &UnstableCreateElicitationOther{Action: action}}
-}
-
-// NewUnstableElicitationFormModeSession constructs a UnstableElicitationFormMode using the ” variant.
-func NewUnstableElicitationFormModeSession(requestedSchema UnstableElicitationSchema, sessionId SessionId) UnstableElicitationFormMode {
-	return UnstableElicitationFormMode{Session: &UnstableElicitationFormModeSession{
-		RequestedSchema: requestedSchema,
-		SessionId:       sessionId,
-	}}
-}
-
-// NewUnstableElicitationFormModeRequest constructs a UnstableElicitationFormMode using the ” variant.
-func NewUnstableElicitationFormModeRequest(requestId RequestId, requestedSchema UnstableElicitationSchema) UnstableElicitationFormMode {
-	return UnstableElicitationFormMode{Request: &UnstableElicitationFormModeRequest{
-		RequestId:       requestId,
-		RequestedSchema: requestedSchema,
-	}}
-}
-
-// NewUnstableElicitationUrlModeSession constructs a UnstableElicitationUrlMode using the ” variant.
-func NewUnstableElicitationUrlModeSession(elicitationId UnstableElicitationId, sessionId SessionId, url string) UnstableElicitationUrlMode {
-	return UnstableElicitationUrlMode{Session: &UnstableElicitationUrlModeSession{
-		ElicitationId: elicitationId,
-		SessionId:     sessionId,
-		Url:           url,
-	}}
-}
-
-// NewUnstableElicitationUrlModeRequest constructs a UnstableElicitationUrlMode using the ” variant.
-func NewUnstableElicitationUrlModeRequest(elicitationId UnstableElicitationId, requestId RequestId, url string) UnstableElicitationUrlMode {
-	return UnstableElicitationUrlMode{Request: &UnstableElicitationUrlModeRequest{
-		ElicitationId: elicitationId,
-		RequestId:     requestId,
-		Url:           url,
+// NewUnstableEmbeddedResourceResourceBlobResourceContents constructs a UnstableEmbeddedResourceResource using the ” variant.
+func NewUnstableEmbeddedResourceResourceBlobResourceContents(blob string, uri string) UnstableEmbeddedResourceResource {
+	return UnstableEmbeddedResourceResource{BlobResourceContents: &UnstableBlobResourceContents{
+		Blob: blob,
+		Uri:  uri,
 	}}
 }
 
 // NewUnstableMcpServerHttp constructs a UnstableMcpServer using the 'http' variant.
-func NewUnstableMcpServerHttp(headers []HttpHeader, name string, url string) UnstableMcpServer {
-	return UnstableMcpServer{Http: &UnstableMcpServerHttp{
+func NewUnstableMcpServerHttp(headers []UnstableHttpHeader, name string, url string) UnstableMcpServer {
+	return UnstableMcpServer{Http: &UnstableMcpServerHttpInline{
 		Headers: headers,
 		Name:    name,
 		Type:    "http",
@@ -294,8 +419,8 @@ func NewUnstableMcpServerHttp(headers []HttpHeader, name string, url string) Uns
 }
 
 // NewUnstableMcpServerSse constructs a UnstableMcpServer using the 'sse' variant.
-func NewUnstableMcpServerSse(headers []HttpHeader, name string, url string) UnstableMcpServer {
-	return UnstableMcpServer{Sse: &UnstableMcpServerSse{
+func NewUnstableMcpServerSse(headers []UnstableHttpHeader, name string, url string) UnstableMcpServer {
+	return UnstableMcpServer{Sse: &UnstableMcpServerSseInline{
 		Headers: headers,
 		Name:    name,
 		Type:    "sse",
@@ -313,8 +438,8 @@ func NewUnstableMcpServerAcp(name string, serverId UnstableMcpServerAcpId) Unsta
 }
 
 // NewUnstableMcpServerStdio constructs a UnstableMcpServer using the ” variant.
-func NewUnstableMcpServerStdio(args []string, command string, env []EnvVariable, name string) UnstableMcpServer {
-	return UnstableMcpServer{Stdio: &McpServerStdio{
+func NewUnstableMcpServerStdio(args []string, command string, env []UnstableEnvVariable, name string) UnstableMcpServer {
+	return UnstableMcpServer{Stdio: &UnstableMcpServerStdio{
 		Args:    args,
 		Command: command,
 		Env:     env,
@@ -322,44 +447,33 @@ func NewUnstableMcpServerStdio(args []string, command string, env []EnvVariable,
 	}}
 }
 
-// NewUnstableNesSuggestionEdit constructs a UnstableNesSuggestion using the 'edit' variant.
-func NewUnstableNesSuggestionEdit(edits []UnstableNesTextEdit, id UnstableNesSuggestionId, uri string) UnstableNesSuggestion {
-	return UnstableNesSuggestion{Edit: &UnstableNesSuggestionEdit{
-		Edits: edits,
-		Id:    id,
-		Kind:  "edit",
-		Uri:   uri,
+// NewUnstableMessageMcpResponseResult constructs a UnstableMessageMcpResponse using the ” variant.
+func NewUnstableMessageMcpResponseResult(result any) UnstableMessageMcpResponse {
+	return UnstableMessageMcpResponse{Result: &UnstableMessageMcpResult{Result: result}}
+}
+
+// NewUnstableMessageMcpResponseError constructs a UnstableMessageMcpResponse using the ” variant.
+func NewUnstableMessageMcpResponseError(errorValue UnstableMcpError) UnstableMessageMcpResponse {
+	return UnstableMessageMcpResponse{Error: &UnstableMessageMcpError{Error: errorValue}}
+}
+
+// NewUnstableSessionConfigOptionSelect constructs a UnstableSessionConfigOption using the 'select' variant.
+func NewUnstableSessionConfigOptionSelect(currentValue SessionConfigValueId, id SessionConfigId, name string, options UnstableSessionConfigSelectOptions) UnstableSessionConfigOption {
+	return UnstableSessionConfigOption{Select: &UnstableSessionConfigOptionSelect{
+		CurrentValue: currentValue,
+		Id:           id,
+		Name:         name,
+		Options:      options,
+		Type:         "select",
 	}}
 }
 
-// NewUnstableNesSuggestionJump constructs a UnstableNesSuggestion using the 'jump' variant.
-func NewUnstableNesSuggestionJump(id UnstableNesSuggestionId, position UnstablePosition, uri string) UnstableNesSuggestion {
-	return UnstableNesSuggestion{Jump: &UnstableNesSuggestionJump{
-		Id:       id,
-		Kind:     "jump",
-		Position: position,
-		Uri:      uri,
-	}}
-}
-
-// NewUnstableNesSuggestionRename constructs a UnstableNesSuggestion using the 'rename' variant.
-func NewUnstableNesSuggestionRename(id UnstableNesSuggestionId, newName string, position UnstablePosition, uri string) UnstableNesSuggestion {
-	return UnstableNesSuggestion{Rename: &UnstableNesSuggestionRename{
-		Id:       id,
-		Kind:     "rename",
-		NewName:  newName,
-		Position: position,
-		Uri:      uri,
-	}}
-}
-
-// NewUnstableNesSuggestionSearchAndReplace constructs a UnstableNesSuggestion using the 'searchAndReplace' variant.
-func NewUnstableNesSuggestionSearchAndReplace(id UnstableNesSuggestionId, replace string, search string, uri string) UnstableNesSuggestion {
-	return UnstableNesSuggestion{SearchAndReplace: &UnstableNesSuggestionSearchAndReplace{
-		Id:      id,
-		Kind:    "searchAndReplace",
-		Replace: replace,
-		Search:  search,
-		Uri:     uri,
+// NewUnstableSessionConfigOptionBoolean constructs a UnstableSessionConfigOption using the 'boolean' variant.
+func NewUnstableSessionConfigOptionBoolean(currentValue bool, id SessionConfigId, name string) UnstableSessionConfigOption {
+	return UnstableSessionConfigOption{Boolean: &UnstableSessionConfigOptionBoolean{
+		CurrentValue: currentValue,
+		Id:           id,
+		Name:         name,
+		Type:         "boolean",
 	}}
 }

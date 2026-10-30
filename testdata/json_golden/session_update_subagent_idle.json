@@ -1,0 +1,12 @@
+{
+  "sessionUpdate": "subagent_update",
+  "sessionId": "child-1",
+  "state": {
+    "state": "idle",
+    "stopReason": "error",
+    "error": {
+      "code": -32603,
+      "message": "Review failed"
+    }
+  }
+}

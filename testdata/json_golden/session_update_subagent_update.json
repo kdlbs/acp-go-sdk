@@ -1,0 +1,13 @@
+{
+  "sessionUpdate": "subagent_update",
+  "sessionId": "child-1",
+  "title": "Reviewer",
+  "capabilities": {
+    "cancel": {}
+  },
+  "state": {
+    "state": "running"
+  },
+  "cwd": "/workspace/review",
+  "additionalDirectories": []
+}
