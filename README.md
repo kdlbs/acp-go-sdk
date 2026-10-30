@@ -185,6 +185,10 @@ Next Edit Suggestions, their document notifications, and `env_var` authenticatio
 are absent from the new upstream schema. Their experimental Go APIs are removed.
 The existing legacy model compatibility API remains available.
 
+Schema 1.28 decoding silently drops malformed session configuration options,
+including entries with a missing or empty `name`.
+An invalid model option can therefore surface later as unavailable model selection.
+
 ### Extension methods
 
 ACP supports **extension methods** for custom JSON-RPC methods whose names start with `_`.

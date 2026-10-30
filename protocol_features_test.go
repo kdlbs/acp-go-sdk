@@ -164,6 +164,27 @@ func TestProtocolDecoding_FieldRules(t *testing.T) {
 	}
 }
 
+func TestNewSessionResponse_DropsMalformedConfigOptionNames(t *testing.T) {
+	const payload = `{
+		"sessionId":"session-1",
+		"configOptions":[
+			{"type":"select","id":"missing","currentValue":"one","options":[{"name":"One","value":"one"}]},
+			{"type":"select","id":"empty","name":"","currentValue":"one","options":[{"name":"One","value":"one"}]},
+			{"type":"select","id":"model","name":"Model","currentValue":"one","options":[{"name":"One","value":"one"}]}
+		]
+	}`
+	var response NewSessionResponse
+	if err := json.Unmarshal([]byte(payload), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.ConfigOptions) != 1 || response.ConfigOptions[0].Select == nil {
+		t.Fatalf("expected only the valid option, got %+v", response.ConfigOptions)
+	}
+	if option := response.ConfigOptions[0].Select; option.Id != "model" || option.Name != "Model" {
+		t.Fatalf("valid option was not preserved: %+v", option)
+	}
+}
+
 func TestSystemPrompt_LifecycleRequests(t *testing.T) {
 	prompt := SystemPromptText(SystemPromptModeAppend, "Review changes before editing.")
 	tests := []any{
