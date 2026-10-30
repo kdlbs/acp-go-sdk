@@ -1,0 +1,10 @@
+{
+  "sessionUpdate": "session_message",
+  "messageId": "incoming-1",
+  "senderSessionId": "parent-1",
+  "recipientSessionId": "child-1",
+  "senderMessageId": "outgoing-1",
+  "recipientMessageId": null,
+  "content": [],
+  "_meta": null
+}

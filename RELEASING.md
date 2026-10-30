@@ -4,8 +4,8 @@ The Go SDK and the ACP schema artifacts use independent version numbers.
 
 - `sdk/version` contains the SDK version used for the next Go module tag, such
   as `v0.14.0`.
-- `schema/version` selects the ACP schema input, such as `1.20.0`. The generator
-  downloads that input from the upstream release `schema-v1.20.0`.
+- `schema/version` selects the ACP schema input, such as `1.28.0`. The generator
+  downloads that input from the upstream release `schema-v1.28.0`.
 - The root `version` file is a generated-schema stamp. It must match
   `schema/version`; it is not the SDK version.
 
@@ -27,13 +27,13 @@ Only perform this step when the SDK should adopt a different published ACP
 schema. Pass the schema artifact version, without the `schema-v` prefix:
 
 ```bash
-make update-schema SCHEMA_VERSION=1.20.0
+make update-schema SCHEMA_VERSION=1.28.0
 ```
 
 This target:
 
-- writes `1.20.0` to `schema/version`
-- downloads stable and unstable inputs from the `schema-v1.20.0` release
+- writes `1.28.0` to `schema/version`
+- downloads stable and unstable inputs from the `schema-v1.28.0` release
 - regenerates the Go bindings and helper APIs
 - formats the repository
 - updates the root `version` generated-schema stamp
@@ -52,7 +52,7 @@ tree. The root `version` and `schema/version` files must remain identical.
 ## Prepare the SDK Release
 
 Choose the next SDK semantic version independently from the schema input. For
-this release, ACP schema `schema-v1.20.0` is published as Go SDK `v0.14.0`:
+this release, ACP schema `schema-v1.28.0` is published as Go SDK `v0.14.0`:
 
 ```bash
 make release VERSION=0.14.0
@@ -97,7 +97,7 @@ git push origin v0.14.0
 ```
 
 Create a GitHub release for `v0.14.0` and mention that it was generated from ACP
-schema `schema-v1.20.0`. The upstream schema tag is an input reference and must
+schema `schema-v1.28.0`. The upstream schema tag is an input reference and must
 not be reused as the Go module tag.
 
 After publication, CI runs `communique` and replaces the release body with

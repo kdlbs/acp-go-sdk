@@ -99,7 +99,7 @@ release:
 .PHONY: update-schema
 update-schema:
 	@if [ "$(origin SCHEMA_VERSION)" != "command line" ]; then \
-		echo "SCHEMA_VERSION is required (e.g. 'make update-schema SCHEMA_VERSION=1.20.0')" 1>&2; \
+		echo "SCHEMA_VERSION is required (e.g. 'make update-schema SCHEMA_VERSION=1.28.0')" 1>&2; \
 		exit 1; \
 	fi
 	@printf '%s\n' "$(SCHEMA_VERSION)" > schema/version

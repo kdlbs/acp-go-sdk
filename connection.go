@@ -591,6 +591,7 @@ func (c *Connection) handleResponse(msg *anyMessage) {
 	c.mu.Unlock()
 
 	if pr != nil {
+		markRemoteErrorEnvelope(*msg)
 		c.notifyMu.Lock()
 		watermark := c.lastEnqueuedNotificationSeq
 		if c.completedNotificationSeq > watermark {
@@ -600,6 +601,16 @@ func (c *Connection) handleResponse(msg *anyMessage) {
 		c.notifyMu.Unlock()
 		pr.ch <- responseEnvelope{msg: *msg, notificationWatermark: watermark}
 	}
+}
+
+// markRemoteErrorEnvelope records response provenance for an error envelope
+// that arrived for a pending request. A contradictory envelope that also
+// carries a result payload establishes no provenance.
+func markRemoteErrorEnvelope(msg anyMessage) {
+	if msg.Error == nil || len(bytes.TrimSpace(msg.Result)) > 0 {
+		return
+	}
+	msg.Error.remoteResponse = true
 }
 
 func (c *Connection) handleCancelRequest(msg *anyMessage) {

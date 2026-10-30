@@ -24,6 +24,7 @@ const (
 	BindClient
 	BindClientExperimental
 	BindClientTerminal
+	BindClientElicitation
 )
 
 // MethodInfo captures association between a wire method and its Go types and binding.
@@ -185,6 +186,9 @@ func classifyBinding(schema *load.Schema, mi *MethodInfo) MethodBinding {
 		// Route unstable methods to the experimental interface.
 		if isUnstableMethod(schema, mi) {
 			return BindClientExperimental
+		}
+		if mi.Method == "elicitation/create" || mi.Method == "elicitation/complete" {
+			return BindClientElicitation
 		}
 		return BindClient
 	default:

@@ -153,6 +153,7 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 		if def == nil {
 			continue
 		}
+		def = flattenOptionalObjectUnion(schema, def)
 
 		// DEFENSIVE PROGRAMMING: Ensure we're not about to emit a type that conflicts
 		// with a previously generated nested type. This should never happen since we
@@ -347,7 +348,7 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 				if nestedTypeName, hasNested := nestedTypes[pk]; hasNested {
 					fieldType = Id(nestedTypeName)
 				} else {
-					fieldType = jenTypeForOptional(prop)
+					fieldType = objectFieldType(name, pk, prop)
 				}
 				st = append(st, Id(field).Add(fieldType).Tag(map[string]string{"json": tag}))
 			}
@@ -358,8 +359,15 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 					Id("LegacyModels").Op("*").Id("LegacyModels").Tag(map[string]string{"json": "models,omitempty"}),
 				)
 			}
+			if preservesUnevaluatedProperties(def) {
+				st = append(st, Id("Extra").Map(String()).Qual("encoding/json", "RawMessage").Tag(map[string]string{"json": "-"}))
+			}
 			f.Type().Id(name).Struct(st...)
 			f.Line()
+			emitPatchMarshal(f, name, def.Properties)
+			if preservesUnevaluatedProperties(def) {
+				emitOpenObjectJSONMethods(f, name, def.Properties)
+			}
 
 			// If the struct has any fields with schema defaults, synthesize MarshalJSON and UnmarshalJSON
 			if len(defaults) > 0 {
@@ -383,33 +391,9 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 				})
 				f.Line()
 
-				// UnmarshalJSON: apply defaults when field is missing or null (and schema doesn't include null)
-				f.Func().Params(Id("v").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("b").Index().Byte()).Error().BlockFunc(func(g *Group) {
-					g.Var().Id("m").Map(String()).Qual("encoding/json", "RawMessage")
-					g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("m")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
-					g.Type().Id("Alias").Id(name)
-					g.Var().Id("a").Id("Alias")
-					g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("a")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
-					for _, dp := range defaults {
-						g.BlockFunc(func(h *Group) {
-							h.List(Id("_rm"), Id("_ok")).Op(":=").Id("m").Index(Lit(dp.propName))
-							// Apply default when missing, or when null and null is not allowed
-							if dp.allowNull {
-								h.If(Op("!").Id("_ok")).Block(
-									Qual("encoding/json", "Unmarshal").Call(Index().Byte().Parens(Lit(dp.defaultJSON)), Op("&").Id("a").Dot(dp.fieldName)),
-								)
-							} else {
-								h.If(Op("!").Id("_ok").Op("||").Parens(Id("string").Call(Id("_rm")).Op("==").Lit("null"))).Block(
-									Qual("encoding/json", "Unmarshal").Call(Index().Byte().Parens(Lit(dp.defaultJSON)), Op("&").Id("a").Dot(dp.fieldName)),
-								)
-							}
-						})
-					}
-					g.Op("*").Id("v").Op("=").Id(name).Call(Id("a"))
-					g.Return(Nil())
-				})
-				f.Line()
 			}
+			emitObjectUnmarshal(f, name, def.Properties, preservesUnevaluatedProperties(def))
+
 		case ir.PrimaryType(def) == "string" || ir.PrimaryType(def) == "integer" || ir.PrimaryType(def) == "number" || ir.PrimaryType(def) == "boolean":
 			f.Type().Id(name).Add(primitiveJenType(ir.PrimaryType(def)))
 			f.Line()
@@ -483,6 +467,7 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 	clientStable := []Code{}
 	clientExperimental := []Code{}
 	clientTerminal := []Code{}
+	clientElicitation := []Code{}
 	for _, k := range ir.SortedKeys(meta.ClientMethods) {
 		wire := meta.ClientMethods[k]
 		mi := groups["client|"+wire]
@@ -495,6 +480,8 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 			target = &clientExperimental
 		case ir.BindClientTerminal:
 			target = &clientTerminal
+		case ir.BindClientElicitation:
+			target = &clientElicitation
 		}
 		if desc := methodDescription(schema, mi); desc != "" {
 			// Method descriptions can be multi-line, format them properly
@@ -514,6 +501,10 @@ func WriteTypesJen(outDir string, schema *load.Schema, meta *load.Meta) error {
 		}
 	}
 	f.Type().Id("Client").Interface(clientStable...)
+	if len(clientElicitation) > 0 {
+		f.Comment("ClientElicitation defines optional support for structured input and URL elicitation. Advertise the elicitation capability before using these methods.")
+		f.Type().Id("ClientElicitation").Interface(clientElicitation...)
+	}
 	if len(clientTerminal) > 0 {
 		f.Comment("ClientTerminal defines terminal-related experimental methods (x-docs-ignore). Implement and advertise 'terminal: true' to enable 'terminal/*'.")
 		f.Type().Id("ClientTerminal").Interface(clientTerminal...)
@@ -597,7 +588,8 @@ func isOpenStringEnum(def *load.Definition) bool {
 }
 
 func preservesUnevaluatedProperties(definition *load.Definition) bool {
-	return definition != nil && bytes.Equal(bytes.TrimSpace(definition.UnevaluatedProperties), []byte("true"))
+	return definition != nil && (bytes.Equal(bytes.TrimSpace(definition.UnevaluatedProperties), []byte("true")) ||
+		bytes.Equal(bytes.TrimSpace(definition.AdditionalProperties), []byte("true")))
 }
 
 func collectPropertyConstValues(definition *load.Definition, propertyName string) []string {
@@ -645,26 +637,6 @@ func emitOpenObjectJSONMethods(f *File, name string, properties map[string]*load
 		g.Return(Qual("encoding/json", "Marshal").Call(Id("object")))
 	})
 	f.Line()
-
-	knownProperties := make([]string, 0, len(properties))
-	for propertyName := range properties {
-		knownProperties = append(knownProperties, propertyName)
-	}
-	sort.Strings(knownProperties)
-	f.Func().Params(Id("v").Op("*").Id(name)).Id("UnmarshalJSON").Params(Id("data").Index().Byte()).Error().BlockFunc(func(g *Group) {
-		g.Type().Id("Alias").Id(name)
-		g.Var().Id("decoded").Id("Alias")
-		g.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("data"), Op("&").Id("decoded")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
-		g.Var().Id("extra").Map(String()).Qual("encoding/json", "RawMessage")
-		g.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("data"), Op("&").Id("extra")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
-		for _, propertyName := range knownProperties {
-			g.Id("delete").Call(Id("extra"), Lit(propertyName))
-		}
-		g.Op("*").Id("v").Op("=").Id(name).Call(Id("decoded"))
-		g.Id("v").Dot("Extra").Op("=").Id("extra")
-		g.Return(Nil())
-	})
-	f.Line()
 }
 
 func emitUnionVariantValidate(f *File, name string, schema *load.Schema, properties map[string]*load.Definition, required []string, discriminator string, reservedDiscriminatorValues []string) {
@@ -686,7 +658,7 @@ func emitUnionVariantValidate(f *File, name string, schema *load.Schema, propert
 					Return(Qual("fmt", "Errorf").Call(Lit(propertyName + " is required"))),
 				)
 			default:
-				if referencedDefinitionName(property) != "" && resolved != nil && (len(resolved.AnyOf) > 0 || (len(resolved.OneOf) > 0 && !isStringConstUnion(resolved))) {
+				if referencedDefinitionName(property) != "" && resolved != nil && !isOpenStringEnum(resolved) && (len(resolved.AnyOf) > 0 || (len(resolved.OneOf) > 0 && !isStringConstUnion(resolved))) {
 					g.If(Id("err").Op(":=").Id("v").Dot(field).Dot("Validate").Call(), Id("err").Op("!=").Nil()).Block(
 						Return(Qual("fmt", "Errorf").Call(Lit(propertyName+" is required: %w"), Id("err"))),
 					)
@@ -857,7 +829,7 @@ func includesNull(d *load.Definition) bool {
 // We intentionally do not attempt to resolve semantic constraints beyond that.
 func expandAllOf(schema *load.Schema, d *load.Definition) *load.Definition {
 	if d == nil || len(d.AllOf) == 0 {
-		return d
+		return flattenOptionalObjectUnion(schema, d)
 	}
 
 	merged := *d
@@ -915,6 +887,9 @@ func expandAllOf(schema *load.Schema, d *load.Definition) *load.Definition {
 		if len(merged.UnevaluatedProperties) == 0 && len(resolved.UnevaluatedProperties) > 0 {
 			merged.UnevaluatedProperties = resolved.UnevaluatedProperties
 		}
+		if len(merged.AdditionalProperties) == 0 && len(resolved.AdditionalProperties) > 0 {
+			merged.AdditionalProperties = resolved.AdditionalProperties
+		}
 
 		if len(resolved.Properties) > 0 {
 			if merged.Properties == nil {
@@ -936,7 +911,7 @@ func expandAllOf(schema *load.Schema, d *load.Definition) *load.Definition {
 		}
 	}
 
-	return &merged
+	return flattenOptionalObjectUnion(schema, &merged)
 }
 
 type unionAlternative struct {
@@ -1368,7 +1343,7 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 					if _, ok := req[pk]; !ok {
 						tag = pk + ",omitempty"
 					}
-					st = append(st, Id(field).Add(jenTypeForOptional(pDef)).Tag(map[string]string{"json": tag}))
+					st = append(st, Id(field).Add(objectFieldType(tname, pk, pDef)).Tag(map[string]string{"json": tag}))
 				}
 				if preserveUnknown {
 					st = append(
@@ -1406,9 +1381,11 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 			f.Type().Id(tname).Struct(st...)
 			f.Line()
 			if isObj {
+				emitPatchMarshal(f, tname, mergedVariantProps)
 				if preserveUnknown {
 					emitOpenObjectJSONMethods(f, tname, mergedVariantProps)
 				}
+				emitObjectUnmarshal(f, tname, mergedVariantProps, preserveUnknown)
 				emitUnionVariantValidate(f, tname, schema, mergedVariantProps, combinedRequired, discKey, reservedDiscriminatorValues)
 			}
 		skipStructEmit:
@@ -1494,6 +1471,25 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 		}
 		g.Var().Id("m").Map(String()).Qual("encoding/json", "RawMessage")
 		g.If(List(Id("err")).Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("m")), Id("err").Op("==").Nil()).BlockFunc(func(obj *Group) {
+			// The MCP carrier explicitly gives result precedence over error.
+			if strings.TrimPrefix(name, "Unstable") == "MessageMcpResponse" {
+				for _, vi := range variants {
+					key := strings.ToLower(vi.fieldName)
+					obj.If(List(Id("raw"), Id("ok")).Op(":=").Id("m").Index(Lit(key)), Id("ok")).BlockFunc(func(h *Group) {
+						if key == "error" {
+							h.If(Id("string").Call(Id("raw")).Op("==").Lit("null")).Block(Return(Qual("errors", "New").Call(Lit("MCP error must be an object"))))
+						} else {
+							h.Id("_").Op("=").Id("raw")
+						}
+						h.Var().Id("v").Id(vi.typeName)
+						h.If(Id("err").Op(":=").Qual("encoding/json", "Unmarshal").Call(Id("b"), Op("&").Id("v")), Id("err").Op("!=").Nil()).Block(Return(Id("err")))
+						h.Id("u").Dot(vi.fieldName).Op("=").Op("&").Id("v")
+						h.Return(Nil())
+					})
+				}
+				obj.Return(Qual("errors", "New").Call(Lit("MCP response requires result or error")))
+				return
+			}
 			// Prefer discriminator-based dispatch when available (e.g. "type", "outcome")
 			if discKey != "" {
 				obj.BlockFunc(func(h *Group) {
@@ -1597,6 +1593,10 @@ func emitUnion(f *File, name string, schema *load.Schema, parentDef *load.Defini
 				} else {
 					gg.List(Id("_b"), Id("_e")).Op(":=").Qual("encoding/json", "Marshal").Call(Op("*").Id("u").Dot(vi.fieldName))
 					gg.If(Id("_e").Op("!=").Nil()).Block(Return(Index().Byte().Values(), Id("_e")))
+					if strings.TrimPrefix(name, "Unstable") == "MessageMcpResponse" {
+						gg.Return(Id("_b"), Nil())
+						return
+					}
 					if !vi.isObject {
 						// Non-object variants (e.g., arrays/primitives) are already in final wire shape.
 						gg.Return(Id("_b"), Nil())

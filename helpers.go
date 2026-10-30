@@ -78,6 +78,44 @@ func Ptr[T any](v T) *T {
 	return &v
 }
 
+// UpdateNotice constructs a live notice. The client must advertise session.notices.
+func UpdateNotice(severity NoticeSeverity, title string) SessionUpdate {
+	return SessionUpdate{Notice: &SessionUpdateNotice{Severity: severity, Title: title}}
+}
+
+// UpdateCompaction constructs a compaction lifecycle update.
+// The client must advertise session.compaction.
+func UpdateCompaction(id CompactionId, status CompactionStatus) SessionUpdate {
+	return SessionUpdate{CompactionUpdate: &SessionCompactionUpdate{CompactionId: id, Status: status}}
+}
+
+// UpdateCompactionSummary appends content to a compaction summary.
+func UpdateCompactionSummary(id CompactionId, content ContentBlock) SessionUpdate {
+	return SessionUpdate{CompactionSummaryChunk: &SessionUpdateCompactionSummaryChunk{CompactionId: id, Content: content}}
+}
+
+// UpdateSubagent announces or patches a child session on its parent session.
+// The client must advertise subagents.
+func UpdateSubagent(id SessionId) SessionUpdate {
+	return SessionUpdate{SubagentUpdate: &SessionSubagentUpdate{SessionId: id}}
+}
+
+// UpdateSessionMessage constructs an upsert for an inter-session message.
+func UpdateSessionMessage(id MessageId) SessionUpdate {
+	return SessionUpdate{SessionMessage: &SessionUpdateSessionMessage{MessageId: id}}
+}
+
+// UpdateSessionMessageChunk appends content to an inter-session message.
+func UpdateSessionMessageChunk(id MessageId, content ContentBlock) SessionUpdate {
+	return SessionUpdate{SessionMessageChunk: &SessionUpdateSessionMessageChunk{MessageId: id, Content: content}}
+}
+
+// SystemPromptText constructs text instructions for a session lifecycle request.
+// Check sessionCapabilities.systemPrompt and its supported modes before sending.
+func SystemPromptText(mode SystemPromptMode, text string) SystemPrompt {
+	return SystemPrompt{Mode: mode, Content: []ContentBlock{TextBlock(text)}}
+}
+
 // UpdateUserMessage constructs a user_message_chunk update with the given content.
 func UpdateUserMessage(content ContentBlock) SessionUpdate {
 	return SessionUpdate{UserMessageChunk: &SessionUpdateUserMessageChunk{Content: content}}
@@ -114,6 +152,11 @@ func UpdatePlan(entries ...PlanEntry) SessionUpdate {
 }
 
 type ToolCallStartOpt func(tc *SessionUpdateToolCall)
+
+// WithStartName sets the programmatic name of a tool call.
+func WithStartName(name string) ToolCallStartOpt {
+	return func(tc *SessionUpdateToolCall) { tc.Name = Ptr(name) }
+}
 
 // StartToolCall constructs a tool_call update with required fields and applies optional modifiers.
 func StartToolCall(id ToolCallId, title string, opts ...ToolCallStartOpt) SessionUpdate {
@@ -182,6 +225,11 @@ func WithStartRawOutput(v any) ToolCallStartOpt {
 }
 
 type ToolCallUpdateOpt func(tu *SessionToolCallUpdate)
+
+// WithUpdateName sets the programmatic name of a tool call update.
+func WithUpdateName(name string) ToolCallUpdateOpt {
+	return func(tu *SessionToolCallUpdate) { tu.Name = Ptr(name) }
+}
 
 // UpdateToolCall constructs a tool_call_update with the given ID and applies optional modifiers.
 func UpdateToolCall(id ToolCallId, opts ...ToolCallUpdateOpt) SessionUpdate {
