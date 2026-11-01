@@ -1,0 +1,8 @@
+{
+  "sessionUpdate": "session_message_chunk",
+  "messageId": "incoming-1",
+  "content": {
+    "type": "text",
+    "text": "Review the changes."
+  }
+}

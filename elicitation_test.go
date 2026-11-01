@@ -7,21 +7,21 @@ import (
 )
 
 func TestCreateElicitationRequestScopeRoundTrip(t *testing.T) {
-	schema := UnstableElicitationSchema{Properties: map[string]any{}, Type: UnstableElicitationSchemaTypeObject}
+	schema := ElicitationSchema{Properties: map[string]any{}, Type: ElicitationSchemaTypeObject}
 	requestID := requestIDString("request-1")
 	toolCallID := ToolCallId("tool-1")
 
-	formSession := NewUnstableCreateElicitationRequestFormSession("Choose values", schema, "session-1")
+	formSession := NewCreateElicitationRequestFormSession("Choose values", schema, "session-1")
 	formSession.FormSession.ToolCallId = &toolCallID
 	tests := []struct {
 		name          string
-		request       UnstableCreateElicitationRequest
+		request       CreateElicitationRequest
 		expectedScope string
 	}{
 		{name: "form session", request: formSession, expectedScope: "sessionId"},
-		{name: "form request", request: NewUnstableCreateElicitationRequestFormRequest("Choose values", requestID, schema), expectedScope: "requestId"},
-		{name: "url session", request: NewUnstableCreateElicitationRequestUrlSession("elicitation-1", "Open the URL", "session-1", "https://example.com/input"), expectedScope: "sessionId"},
-		{name: "url request", request: NewUnstableCreateElicitationRequestUrlRequest("elicitation-1", "Open the URL", requestID, "https://example.com/input"), expectedScope: "requestId"},
+		{name: "form request", request: NewCreateElicitationRequestFormRequest("Choose values", requestID, schema), expectedScope: "requestId"},
+		{name: "url session", request: NewCreateElicitationRequestUrlSession("elicitation-1", "Open the URL", "session-1", "https://example.com/input"), expectedScope: "sessionId"},
+		{name: "url request", request: NewCreateElicitationRequestUrlRequest("elicitation-1", "Open the URL", requestID, "https://example.com/input"), expectedScope: "requestId"},
 	}
 
 	for _, tt := range tests {
@@ -48,7 +48,7 @@ func TestCreateElicitationRequestScopeRoundTrip(t *testing.T) {
 				t.Fatalf("wire payload %s unexpectedly contains %q", encoded, oppositeScope)
 			}
 
-			var decoded UnstableCreateElicitationRequest
+			var decoded CreateElicitationRequest
 			if err := json.Unmarshal(encoded, &decoded); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
@@ -75,12 +75,12 @@ func TestCreateElicitationRequestScopeRoundTrip(t *testing.T) {
 }
 
 func TestCreateElicitationRequestRejectsInvalidScope(t *testing.T) {
-	schema := UnstableElicitationSchema{Properties: map[string]any{}, Type: UnstableElicitationSchemaTypeObject}
-	missingSession := NewUnstableCreateElicitationRequestFormSession("Choose values", schema, "")
+	schema := ElicitationSchema{Properties: map[string]any{}, Type: ElicitationSchemaTypeObject}
+	missingSession := NewCreateElicitationRequestFormSession("Choose values", schema, "")
 	if err := missingSession.Validate(); err == nil {
 		t.Fatal("session-scoped request with an empty sessionId passed validation")
 	}
-	missingRequest := NewUnstableCreateElicitationRequestFormRequest("Choose values", RequestId{}, schema)
+	missingRequest := NewCreateElicitationRequestFormRequest("Choose values", RequestId{}, schema)
 	if err := missingRequest.Validate(); err == nil {
 		t.Fatal("request-scoped request with an empty requestId passed validation")
 	}
@@ -108,7 +108,7 @@ func TestCreateElicitationRequestRejectsInvalidScope(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var request UnstableCreateElicitationRequest
+			var request CreateElicitationRequest
 			if err := json.Unmarshal([]byte(tt.payload), &request); err != nil {
 				t.Fatalf("Unmarshal should preserve validation failure: %v", err)
 			}
@@ -120,26 +120,26 @@ func TestCreateElicitationRequestRejectsInvalidScope(t *testing.T) {
 }
 
 func TestElicitationAnyOfHelpersMergeParentFields(t *testing.T) {
-	schema := UnstableElicitationSchema{Properties: map[string]any{}, Type: UnstableElicitationSchemaTypeObject}
+	schema := ElicitationSchema{Properties: map[string]any{}, Type: ElicitationSchemaTypeObject}
 	requestID := requestIDString("request-1")
 	tests := []struct {
 		name     string
 		validate func() error
 	}{
 		{name: "form session", validate: func() error {
-			value := NewUnstableElicitationFormModeSession(schema, "session-1")
+			value := NewElicitationFormModeSession(schema, "session-1")
 			return value.Validate()
 		}},
 		{name: "form request", validate: func() error {
-			value := NewUnstableElicitationFormModeRequest(requestID, schema)
+			value := NewElicitationFormModeRequest(requestID, schema)
 			return value.Validate()
 		}},
 		{name: "url session", validate: func() error {
-			value := NewUnstableElicitationUrlModeSession("elicitation-1", "session-1", "https://example.com/input")
+			value := NewElicitationUrlModeSession("elicitation-1", "session-1", "https://example.com/input")
 			return value.Validate()
 		}},
 		{name: "url request", validate: func() error {
-			value := NewUnstableElicitationUrlModeRequest("elicitation-1", requestID, "https://example.com/input")
+			value := NewElicitationUrlModeRequest("elicitation-1", requestID, "https://example.com/input")
 			return value.Validate()
 		}},
 	}
@@ -157,13 +157,13 @@ func TestCreateElicitationCustomModesPreserveExtensionFields(t *testing.T) {
 		name          string
 		payload       string
 		expectedScope string
-		extra         func(UnstableCreateElicitationRequest) map[string]json.RawMessage
+		extra         func(CreateElicitationRequest) map[string]json.RawMessage
 	}{
 		{
 			name:          "session scope",
 			expectedScope: "sessionId",
 			payload:       `{"mode":"_vendor/custom","message":"Custom input","sessionId":"session-1","toolCallId":"tool-1","flag":true,"count":3,"object":{"nested":"value"},"array":[1,"two",false],"nothing":null}`,
-			extra: func(request UnstableCreateElicitationRequest) map[string]json.RawMessage {
+			extra: func(request CreateElicitationRequest) map[string]json.RawMessage {
 				if request.OtherSession == nil {
 					t.Fatal("custom session payload did not select OtherSession")
 				}
@@ -174,7 +174,7 @@ func TestCreateElicitationCustomModesPreserveExtensionFields(t *testing.T) {
 			name:          "request scope",
 			expectedScope: "requestId",
 			payload:       `{"mode":"future_mode","message":"Custom input","requestId":"request-1","enabled":false,"ratio":1.25,"object":{"nested":{"depth":2}},"array":[{"id":1},null],"nothing":null}`,
-			extra: func(request UnstableCreateElicitationRequest) map[string]json.RawMessage {
+			extra: func(request CreateElicitationRequest) map[string]json.RawMessage {
 				if request.OtherRequest == nil {
 					t.Fatal("custom request payload did not select OtherRequest")
 				}
@@ -185,7 +185,7 @@ func TestCreateElicitationCustomModesPreserveExtensionFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var request UnstableCreateElicitationRequest
+			var request CreateElicitationRequest
 			if err := json.Unmarshal([]byte(tt.payload), &request); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
@@ -224,14 +224,14 @@ func TestCreateElicitationOtherModeValidation(t *testing.T) {
 	requestID := requestIDString("request-1")
 	tests := []struct {
 		name    string
-		request UnstableCreateElicitationRequest
+		request CreateElicitationRequest
 		valid   bool
 	}{
-		{name: "future session mode", request: NewUnstableCreateElicitationRequestOtherSession("Custom", "future_mode", "session-1"), valid: true},
-		{name: "extension request mode", request: NewUnstableCreateElicitationRequestOtherRequest("Custom", "_vendor/custom", requestID), valid: true},
-		{name: "empty mode", request: NewUnstableCreateElicitationRequestOtherSession("Custom", "", "session-1")},
-		{name: "reserved form", request: NewUnstableCreateElicitationRequestOtherSession("Custom", "form", "session-1")},
-		{name: "reserved url", request: NewUnstableCreateElicitationRequestOtherRequest("Custom", "url", requestID)},
+		{name: "future session mode", request: NewCreateElicitationRequestOtherSession("Custom", "future_mode", "session-1"), valid: true},
+		{name: "extension request mode", request: NewCreateElicitationRequestOtherRequest("Custom", "_vendor/custom", requestID), valid: true},
+		{name: "empty mode", request: NewCreateElicitationRequestOtherSession("Custom", "", "session-1")},
+		{name: "reserved form", request: NewCreateElicitationRequestOtherSession("Custom", "form", "session-1")},
+		{name: "reserved url", request: NewCreateElicitationRequestOtherRequest("Custom", "url", requestID)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -250,8 +250,8 @@ func TestCreateElicitationOtherModeValidation(t *testing.T) {
 		data   string
 		target interface{ Validate() error }
 	}{
-		{name: "decoded form", data: `{"mode":"form","message":"Custom","sessionId":"session-1"}`, target: &UnstableCreateElicitationOtherSession{}},
-		{name: "decoded url", data: `{"mode":"url","message":"Custom","requestId":"request-1"}`, target: &UnstableCreateElicitationOtherRequest{}},
+		{name: "decoded form", data: `{"mode":"form","message":"Custom","sessionId":"session-1"}`, target: &CreateElicitationOtherSession{}},
+		{name: "decoded url", data: `{"mode":"url","message":"Custom","requestId":"request-1"}`, target: &CreateElicitationOtherRequest{}},
 	}
 	for _, tt := range decodedTests {
 		t.Run(tt.name, func(t *testing.T) {

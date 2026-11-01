@@ -1,0 +1,11 @@
+{
+  "sessionUpdate": "subagent_update",
+  "sessionId": "child-1",
+  "title": null,
+  "description": null,
+  "capabilities": null,
+  "state": null,
+  "cwd": null,
+  "additionalDirectories": null,
+  "_meta": null
+}

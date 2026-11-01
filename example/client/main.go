@@ -50,6 +50,23 @@ func (e *exampleClient) RequestPermission(ctx context.Context, params acp.Reques
 func (e *exampleClient) SessionUpdate(ctx context.Context, params acp.SessionNotification) error {
 	u := params.Update
 	switch {
+	case u.Notice != nil:
+		fmt.Printf("[%s] %s\n", u.Notice.Severity, u.Notice.Title)
+	case u.CompactionUpdate != nil:
+		fmt.Printf("[compaction %s] %s\n", u.CompactionUpdate.CompactionId, u.CompactionUpdate.Status)
+	case u.CompactionSummaryChunk != nil:
+		if text := u.CompactionSummaryChunk.Content.Text; text != nil {
+			fmt.Printf("[compaction summary] %s\n", text.Text)
+		}
+	case u.SubagentUpdate != nil:
+		title, _ := u.SubagentUpdate.Title.Get()
+		fmt.Printf("[subagent %s] %s\n", u.SubagentUpdate.SessionId, title)
+	case u.SessionMessage != nil:
+		fmt.Printf("[session message %s]\n", u.SessionMessage.MessageId)
+	case u.SessionMessageChunk != nil:
+		if text := u.SessionMessageChunk.Content.Text; text != nil {
+			fmt.Printf("[session message %s] %s\n", u.SessionMessageChunk.MessageId, text.Text)
+		}
 	case u.AgentMessageChunk != nil:
 		c := u.AgentMessageChunk.Content
 		if c.Text != nil {
@@ -203,6 +220,11 @@ func main() {
 		ClientCapabilities: acp.ClientCapabilities{
 			Fs:       acp.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
 			Terminal: true,
+			Session: &acp.ClientSessionCapabilities{
+				Notices:    &acp.NoticeCapabilities{},
+				Compaction: &acp.CompactionCapabilities{},
+			},
+			Subagents: &acp.SubagentCapabilities{},
 		},
 	})
 	if err != nil {

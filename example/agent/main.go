@@ -21,9 +21,10 @@ type agentSession struct {
 }
 
 type exampleAgent struct {
-	conn     *acp.AgentSideConnection
-	sessions map[string]*agentSession
-	mu       sync.Mutex
+	conn               *acp.AgentSideConnection
+	sessions           map[string]*agentSession
+	mu                 sync.Mutex
+	clientCapabilities acp.ClientCapabilities
 }
 
 var (
@@ -34,6 +35,10 @@ var (
 
 func newExampleAgent() *exampleAgent {
 	return &exampleAgent{sessions: make(map[string]*agentSession)}
+}
+
+func (a *exampleAgent) UnstableMessageMcp(ctx context.Context, params acp.UnstableMessageMcpNotification) error {
+	return acp.NewMethodNotFound(acp.AgentMethodMcpMessage)
 }
 
 // SetSessionMode implements acp.Agent.
@@ -61,59 +66,9 @@ func (a *exampleAgent) SetSessionConfigOption(ctx context.Context, params acp.Se
 	return acp.SetSessionConfigOptionResponse{}, acp.NewMethodNotFound(acp.AgentMethodSessionSetConfigOption)
 }
 
-// UnstableDidChangeDocument implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDidChangeDocument(ctx context.Context, params acp.UnstableDidChangeDocumentNotification) error {
-	return nil
-}
-
-// UnstableDidCloseDocument implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDidCloseDocument(ctx context.Context, params acp.UnstableDidCloseDocumentNotification) error {
-	return nil
-}
-
-// UnstableDidFocusDocument implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDidFocusDocument(ctx context.Context, params acp.UnstableDidFocusDocumentNotification) error {
-	return nil
-}
-
-// UnstableDidOpenDocument implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDidOpenDocument(ctx context.Context, params acp.UnstableDidOpenDocumentNotification) error {
-	return nil
-}
-
-// UnstableDidSaveDocument implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableDidSaveDocument(ctx context.Context, params acp.UnstableDidSaveDocumentNotification) error {
-	return nil
-}
-
 // Logout implements acp.Agent.
 func (a *exampleAgent) Logout(ctx context.Context, params acp.LogoutRequest) (acp.LogoutResponse, error) {
 	return acp.LogoutResponse{}, acp.NewMethodNotFound(acp.AgentMethodLogout)
-}
-
-// UnstableAcceptNes implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableAcceptNes(ctx context.Context, params acp.UnstableAcceptNesNotification) error {
-	return nil
-}
-
-// UnstableCloseNes implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableCloseNes(ctx context.Context, params acp.UnstableCloseNesRequest) (acp.UnstableCloseNesResponse, error) {
-	return acp.UnstableCloseNesResponse{}, acp.NewMethodNotFound(acp.AgentMethodNesClose)
-}
-
-// UnstableRejectNes implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableRejectNes(ctx context.Context, params acp.UnstableRejectNesNotification) error {
-	return nil
-}
-
-// UnstableStartNes implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableStartNes(ctx context.Context, params acp.UnstableStartNesRequest) (acp.UnstableStartNesResponse, error) {
-	return acp.UnstableStartNesResponse{}, acp.NewMethodNotFound(acp.AgentMethodNesStart)
-}
-
-// UnstableSuggestNes implements acp.AgentExperimental.
-func (a *exampleAgent) UnstableSuggestNes(ctx context.Context, params acp.UnstableSuggestNesRequest) (acp.UnstableSuggestNesResponse, error) {
-	return acp.UnstableSuggestNesResponse{}, acp.NewMethodNotFound(acp.AgentMethodNesSuggest)
 }
 
 // UnstableDisableProvider implements acp.AgentExperimental.
@@ -145,6 +100,9 @@ func (a *exampleAgent) CloseSession(ctx context.Context, params acp.CloseSession
 func (a *exampleAgent) SetAgentConnection(conn *acp.AgentSideConnection) { a.conn = conn }
 
 func (a *exampleAgent) Initialize(ctx context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
+	a.mu.Lock()
+	a.clientCapabilities = params.ClientCapabilities
+	a.mu.Unlock()
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{
@@ -216,6 +174,29 @@ func (a *exampleAgent) Prompt(_ context.Context, params acp.PromptRequest) (acp.
 }
 
 func (a *exampleAgent) simulateTurn(ctx context.Context, sid string) error {
+	a.mu.Lock()
+	capabilities := a.clientCapabilities
+	a.mu.Unlock()
+	if capabilities.Session != nil && capabilities.Session.Notices != nil {
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
+			SessionId: acp.SessionId(sid),
+			Update:    acp.UpdateNotice(acp.NoticeSeverityInfo, "This example simulates agent work"),
+		}); err != nil {
+			return err
+		}
+	}
+	if capabilities.Session != nil && capabilities.Session.Compaction != nil {
+		id := acp.CompactionId(randomID())
+		for _, update := range []acp.SessionUpdate{
+			acp.UpdateCompaction(id, acp.CompactionStatusInProgress),
+			acp.UpdateCompactionSummary(id, acp.TextBlock("Demo summary: the example will show a tool call and a permission request.")),
+			acp.UpdateCompaction(id, acp.CompactionStatusCompleted),
+		} {
+			if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: acp.SessionId(sid), Update: update}); err != nil {
+				return err
+			}
+		}
+	}
 	// disclaimer: stream a demo notice so clients see it's the example agent
 	if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
 		SessionId: acp.SessionId(sid),

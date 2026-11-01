@@ -43,6 +43,16 @@ func jClientAssert(binding ir.MethodBinding, methodName, paramType, respType str
 	switch binding {
 	case ir.BindClientExperimental:
 		return jSingleMethodAssert(Id("c").Dot("client"), "exp", methodName, paramType, respType, hasResponse)
+	case ir.BindClientElicitation:
+		pre, recv := jSingleMethodAssert(Id("c").Dot("client"), "exp", methodName, paramType, respType, hasResponse)
+		legacy, legacyRecv := jSingleMethodAssert(Id("c").Dot("client"), "legacy", "Unstable"+methodName, paramType, respType, hasResponse)
+		if hasResponse {
+			legacy = append(legacy, jCallRequestWithResp(legacyRecv, "Unstable"+methodName)...)
+		} else {
+			legacy = append(legacy, jCallNotification(legacyRecv, "Unstable"+methodName)...)
+		}
+		pre[1] = If(Op("!").Id("ok")).Block(legacy...)
+		return pre, recv
 	case ir.BindClientTerminal:
 		return []Code{
 			List(Id("t"), Id("ok")).Op(":=").Id("c").Dot("client").Assert(Id("ClientTerminal")),

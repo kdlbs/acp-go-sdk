@@ -46,6 +46,7 @@ type Definition struct {
 	// UnevaluatedProperties is retained so emitters can preserve open extension
 	// payloads when a schema explicitly opts into them.
 	UnevaluatedProperties json.RawMessage `json:"unevaluatedProperties"`
+	AdditionalProperties  json.RawMessage `json:"additionalProperties"`
 	DocsIgnore            bool            `json:"x-docs-ignore"`
 	Title                 string          `json:"title"`
 	Const                 any             `json:"const"`
@@ -53,7 +54,10 @@ type Definition struct {
 	XMethod               string          `json:"x-method"`
 	// Default holds the JSON Schema default value, when present.
 	// Used by generators to synthesize defaulting behavior.
-	Default any `json:"default"`
+	Default          any  `json:"default"`
+	DefaultOnError   bool `json:"x-deserialize-default-on-error"`
+	DefaultOnNull    bool `json:"x-deserialize-default-on-null"`
+	SkipInvalidItems bool `json:"x-deserialize-skip-invalid-items"`
 	// Discriminator specifies which property name distinguishes union variants.
 	// Part of JSON Schema's discriminator object support.
 	Discriminator *Discriminator `json:"discriminator,omitempty"`

@@ -413,6 +413,9 @@ func deepCopyDefinition(d *Definition) *Definition {
 	if d.UnevaluatedProperties != nil {
 		copyDef.UnevaluatedProperties = append([]byte(nil), d.UnevaluatedProperties...)
 	}
+	if d.AdditionalProperties != nil {
+		copyDef.AdditionalProperties = append([]byte(nil), d.AdditionalProperties...)
+	}
 	if d.Properties != nil {
 		copyDef.Properties = make(map[string]*Definition, len(d.Properties))
 		for k, v := range d.Properties {
