@@ -29,7 +29,8 @@ var ErrNotificationQueueOverflow = errors.New("notification queue overflow")
 var errNotificationQueueOverflow = ErrNotificationQueueOverflow
 
 type connectionOptions struct {
-	maxQueuedNotifications int
+	maxQueuedNotifications        int
+	allowedExtensionNotifications map[string]struct{}
 }
 
 // ConnectionOption configures a Connection.
@@ -44,6 +45,43 @@ func WithMaxQueuedNotifications(n int) ConnectionOption {
 	return func(o *connectionOptions) {
 		o.maxQueuedNotifications = n
 	}
+}
+
+// WithAllowedExtensionNotifications opts a client-side connection into receiving
+// exact inbound notification method names outside the underscore extension
+// namespace. Names are matched exactly; no prefix or wildcard matching applies.
+//
+// The option only affects agent-to-client notifications. Default unknown
+// notification handling, request routing, and outbound extension validation
+// remain unchanged.
+func WithAllowedExtensionNotifications(methods ...string) ConnectionOption {
+	return func(o *connectionOptions) {
+		if len(methods) == 0 {
+			return
+		}
+		if o.allowedExtensionNotifications == nil {
+			o.allowedExtensionNotifications = make(map[string]struct{}, len(methods))
+		}
+		for _, method := range methods {
+			if method == "" {
+				continue
+			}
+			o.allowedExtensionNotifications[method] = struct{}{}
+		}
+	}
+}
+
+func newConnectionOptions(opts ...ConnectionOption) connectionOptions {
+	options := connectionOptions{maxQueuedNotifications: defaultMaxQueuedNotifications}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+	if options.maxQueuedNotifications <= 0 {
+		options.maxQueuedNotifications = defaultMaxQueuedNotifications
+	}
+	return options
 }
 
 type anyMessage struct {
@@ -129,16 +167,10 @@ type Connection struct {
 }
 
 func NewConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader, opts ...ConnectionOption) *Connection {
-	options := connectionOptions{maxQueuedNotifications: defaultMaxQueuedNotifications}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&options)
-		}
-	}
-	if options.maxQueuedNotifications <= 0 {
-		options.maxQueuedNotifications = defaultMaxQueuedNotifications
-	}
+	return newConnection(handler, peerInput, peerOutput, newConnectionOptions(opts...))
+}
 
+func newConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader, options connectionOptions) *Connection {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	inboundCtx, inboundCancel := context.WithCancelCause(context.Background())
 	c := &Connection{
