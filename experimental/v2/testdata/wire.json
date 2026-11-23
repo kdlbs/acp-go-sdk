@@ -1,0 +1,175 @@
+{
+  "initialize_request": {
+    "protocolVersion": 2,
+    "info": {"name": "preview-client", "version": "1.0"},
+    "capabilities": {"auth": {"terminal": {}}, "elicitation": {"form": {}, "url": {}}},
+    "_meta": {"trace": 9007199254740993}
+  },
+  "initialize_response": {
+    "protocolVersion": 2,
+    "info": {"name": "fixture-agent", "title": "Fixture Agent", "version": "1.0"},
+    "capabilities": {
+      "session": {
+        "prompt": {"image": {}},
+        "mcp": {"stdio": {}, "http": {}},
+        "additionalDirectories": {}
+      }
+    },
+    "authMethods": [
+      {"type": "agent", "methodId": "login-1", "name": "Log in"},
+      {"type": "terminal", "methodId": "terminal-1", "name": "Terminal login", "args": ["login"]}
+    ]
+  },
+  "initialize_legacy_stamped_v2": {
+    "protocolVersion": 2,
+    "agentInfo": {"name": "legacy-fixture", "version": "1.0"},
+    "agentCapabilities": {"loadSession": true}
+  },
+  "auth_login": {"methodId": "login-1"},
+  "auth_logout": {},
+  "auth_response": {"_meta": {"auth": "fixture"}},
+  "session_new": {
+    "cwd": "/workspace",
+    "additionalDirectories": ["/other"],
+    "mcpServers": [
+      {"type": "stdio", "name": "local", "command": "/bin/fixture", "args": ["--stdio"], "env": [{"name": "MODE", "value": "test"}]},
+      {"type": "http", "name": "remote", "url": "https://example.test/mcp", "headers": [{"name": "X-Fixture", "value": "test"}]}
+    ]
+  },
+  "session_new_response": {
+    "sessionId": "session-1",
+    "configOptions": [
+      {
+        "type": "select",
+        "configId": "mode",
+        "name": "Mode",
+        "category": "mode",
+        "currentValue": "fast",
+        "options": [{"value": "fast", "name": "Fast"}, {"value": "slow", "name": "Slow"}]
+      },
+      {"type": "boolean", "configId": "review", "name": "Review", "currentValue": false}
+    ],
+    "availableCommands": [{"type": "command", "name": "help", "description": "List commands"}]
+  },
+  "session_resume_start": {
+    "sessionId": "session-1",
+    "cwd": "/workspace",
+    "additionalDirectories": ["/other"],
+    "mcpServers": [
+      {"type": "stdio", "name": "local", "command": "/bin/fixture", "args": ["--stdio"], "env": [{"name": "MODE", "value": "test"}]},
+      {"type": "http", "name": "remote", "url": "https://example.test/mcp", "headers": [{"name": "X-Fixture", "value": "test"}]}
+    ],
+    "replayFrom": {"type": "start"}
+  },
+  "session_resume": {"sessionId": "session-1", "cwd": "/workspace"},
+  "session_resume_response": {"availableCommands": [{"type": "command", "name": "help", "description": "List commands"}]},
+  "session_list": {"cwd": "/workspace", "cursor": "page-1"},
+  "session_list_response": {
+    "sessions": [{"sessionId": "session-1", "cwd": "/workspace", "title": "Fixture"}],
+    "nextCursor": "page-2"
+  },
+  "session_close": {"sessionId": "session-1"},
+  "session_close_response": {"_meta": {"closed": true}},
+  "session_cancel": {"sessionId": "session-1"},
+  "config_set_select": {"sessionId": "session-1", "configId": "mode", "type": "id", "value": "slow"},
+  "config_set_boolean": {"sessionId": "session-1", "configId": "review", "type": "boolean", "value": false},
+  "config_set_response": {
+    "configOptions": [
+      {
+        "type": "select",
+        "configId": "mode",
+        "name": "Mode",
+        "category": "future_category",
+        "currentValue": "slow",
+        "options": [{"groupId": "local", "name": "Local", "options": [{"value": "slow", "name": "Slow"}]}]
+      }
+    ]
+  },
+  "prompt_request": {
+    "sessionId": "session-1",
+    "prompt": [
+      {"type": "text", "text": "Fixture prompt"},
+      {"type": "image", "data": "AA==", "mimeType": "image/png"}
+    ],
+    "idempotencyKey": "prompt-1"
+  },
+  "prompt_response": {"messageId": "user-1", "_meta": {"accepted": true}},
+  "permission_request": {
+    "sessionId": "session-1",
+    "title": "Read the sample",
+    "subject": {"type": "tool_call", "toolCall": {"toolCallId": "call-1", "title": "Read sample"}},
+    "options": [{"optionId": "once", "kind": "allow_once", "name": "Allow once"}]
+  },
+  "permission_response": {"outcome": {"outcome": "selected", "optionId": "once"}},
+  "elicitation_form": {
+    "mode": "form",
+    "message": "Choose a label",
+    "sessionId": "session-1",
+    "toolCallId": "call-1",
+    "requestedSchema": {
+      "type": "object",
+      "properties": {"label": {"type": "string", "title": "Label"}},
+      "required": ["label"]
+    }
+  },
+  "elicitation_url": {
+    "mode": "url",
+    "message": "Open this URL",
+    "requestId": 9007199254740993,
+    "elicitationId": "elicitation-1",
+    "url": "https://example.test/confirm"
+  },
+  "elicitation_response": {"action": "accept", "content": {"label": "fixture", "serial": 9007199254740993}},
+  "elicitation_complete": {"elicitationId": "elicitation-1"},
+  "state_running": {
+    "sessionUpdate": "state_update",
+    "state": "running",
+    "background": [{"type": "subagent", "sessionId": "child-1"}, {"type": "terminal", "terminalId": "term-1"}]
+  },
+  "state_idle": {"sessionUpdate": "state_update", "state": "idle", "stopReason": "end_turn"},
+  "replay_complete": {"sessionUpdate": "replay_complete"},
+  "user_message": {"sessionUpdate": "user_message", "messageId": "user-1", "content": [{"type": "text", "text": "Fixture prompt"}]},
+  "user_message_chunk": {"sessionUpdate": "user_message_chunk", "messageId": "user-1", "content": {"type": "text", "text": " more"}},
+  "agent_message": {"sessionUpdate": "agent_message", "messageId": "agent-1", "content": []},
+  "agent_message_chunk": {"sessionUpdate": "agent_message_chunk", "messageId": "agent-1", "content": {"type": "text", "text": "Fixture answer"}},
+  "agent_thought": {"sessionUpdate": "agent_thought", "messageId": "thought-1"},
+  "agent_thought_chunk": {"sessionUpdate": "agent_thought_chunk", "messageId": "thought-1", "content": {"type": "text", "text": ""}},
+  "tool_call": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "call-1",
+    "title": null,
+    "kind": "future_kind",
+    "status": "future_status",
+    "content": [],
+    "rawInput": {"serial": 9007199254740993},
+    "_meta": {"cursor": 9007199254740993}
+  },
+  "tool_call_chunk": {"sessionUpdate": "tool_call_content_chunk", "toolCallId": "call-1", "content": {"type": "terminal", "terminalId": "term-1"}},
+  "terminal": {"sessionUpdate": "terminal_update", "terminalId": "term-1", "command": "fixture", "output": {"data": ""}, "exitStatus": {"exitCode": -1}, "size": {"cols": 80, "rows": 24}},
+  "terminal_chunk": {"sessionUpdate": "terminal_output_chunk", "terminalId": "term-1", "data": "fixture output\n"},
+  "subagent": {
+    "sessionId": "session-1",
+    "update": {"sessionUpdate": "subagent_update", "sessionId": "child-1", "title": "Child", "state": {"state": "idle"}, "additionalDirectories": []}
+  },
+  "session_message": {
+    "sessionUpdate": "session_message",
+    "messageId": "handoff-1",
+    "senderSessionId": "session-1",
+    "recipientSessionId": "child-1",
+    "senderMessageId": "user-1",
+    "recipientMessageId": null,
+    "content": [{"type": "text", "text": "Fixture handoff"}]
+  },
+  "session_message_chunk": {"sessionUpdate": "session_message_chunk", "messageId": "handoff-1", "content": {"type": "text", "text": " more"}},
+  "config_update": {"sessionUpdate": "config_option_update", "configOptions": [{"type": "boolean", "configId": "review", "name": "Review", "currentValue": true}]},
+  "commands_update": {"sessionUpdate": "available_commands_update", "availableCommands": [{"type": "command", "name": "find", "description": "Find a fixture", "input": {"type": "text", "hint": "query"}}]},
+  "session_info": {"sessionUpdate": "session_info_update", "title": "", "updatedAt": null, "_meta": {"fixture": null}},
+  "plan_items": {"sessionUpdate": "plan_update", "plan": {"type": "items", "planId": "plan-1", "entries": [{"content": "Read fixture", "priority": "high", "status": "pending"}]}},
+  "plan_markdown": {"sessionUpdate": "plan_update", "plan": {"type": "markdown", "planId": "plan-1", "content": "# Fixture plan", "path": "/workspace/plan.md"}},
+  "plan_removed": {"sessionUpdate": "plan_removed", "planId": "plan-1"},
+  "usage": {"sessionUpdate": "usage_update", "used": 20, "size": 200, "cost": null, "_meta": {}},
+  "notice": {"sessionUpdate": "notice", "severity": "info", "title": "Fixture notice"},
+  "compaction": {"sessionUpdate": "compaction_update", "compactionId": "compaction-1", "status": "future_status", "summary": null, "_meta": null},
+  "compaction_chunk": {"sessionUpdate": "compaction_summary_chunk", "compactionId": "compaction-1", "content": {"type": "text", "text": "Fixture summary"}},
+  "future_update": {"sessionUpdate": "future_update", "payload": [9007199254740993, null], "_meta": {"number": 9007199254740993}}
+}

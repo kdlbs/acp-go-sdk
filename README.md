@@ -85,10 +85,37 @@ Helper constructors are provided to reduce boilerplate when working with union t
 - Tool content: `acp.ToolContent`, `acp.ToolDiffContent`, `acp.ToolTerminalRef`.
 - Utility: `acp.Ptr[T]` for pointer fields in request/update structs.
 
+### ACP v2 Preview client
+
+The Preview client uses the `github.com/coder/acp-go-sdk/experimental/v2`
+import path in this module. It uses the Preview schema pinned in
+[`schema/v2`](schema/v2/README.md).
+
+```go
+client := v2.NewClientSideConnection(v2.ClientHandlers{
+	SessionUpdate: onSessionUpdate,
+}, agentStdin, agentStdout)
+_, err := client.Initialize(ctx, v2.InitializeRequest{
+	Info: v2.Implementation{Name: "my-client", Version: "1.0"},
+})
+```
+
+Your application owns the agent process and its streams. `client.Done()`
+signals that the transport stopped reading. `client.NotificationsDone()`
+closes after queued notification handlers return. Call the authentication
+and session methods after `Initialize` succeeds.
+
+Use `errors.As(err, &legacy)` with `var legacy *v2.LegacyPeerError` to detect
+a recognized v1 peer. For v1 fallback, close the Preview streams and use
+`acp.NewClientSideConnection` with a fresh agent process and streams.
+
+`Prompt` returns the message ID when the agent accepts the prompt.
+Foreground outcomes and replay boundaries arrive through `SessionUpdate`.
+The client also supports optional permission and elicitation handlers.
+
 ### Protocol features in schema 1.28.0
 
 The SDK supports ACP protocol v1 with stable and experimental schema inputs.
-Protocol v2 remains a separate draft.
 
 Clients advertise support during initialization:
 

@@ -81,7 +81,7 @@ func (c *ClientSideConnection) handleWithExtensions(ctx context.Context, method 
 	if c.isKnownMethod(method) {
 		return c.handle(ctx, method, params)
 	}
-	if !isInboundRequest(ctx) {
+	if !IsInboundRequest(ctx) {
 		if h, ok := c.client.(ExtensionNotificationHandler); ok && c.allowsExtensionNotification(method) {
 			if err := h.HandleExtensionNotification(ctx, method, params); err != nil {
 				return nil, toReqErr(err)
