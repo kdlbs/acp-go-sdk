@@ -42,6 +42,7 @@ provenance = "github-attestations"
 [[tools."aqua:numtide/treefmt"]]
 version = "2.5.0"
 backend = "aqua:numtide/treefmt"
+unsupported_platforms = ["windows-x64"]
 
 [tools."aqua:numtide/treefmt"."platforms.linux-arm64"]
 checksum = "sha256:fce47c6fc8cb6a87461b1309fc6d3102eade64b6fe0c9b86678b4eed9eb00e57"
