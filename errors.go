@@ -106,7 +106,9 @@ func toReqErr(err error) *RequestError {
 		return re
 	}
 	if errors.Is(err, context.Canceled) {
-		return NewRequestCancelled(map[string]any{"error": err.Error()})
+		cancelled := NewRequestCancelled(map[string]any{"error": err.Error()})
+		cancelled.cause = err
+		return cancelled
 	}
-	return NewInternalError(map[string]any{"error": err.Error()})
+	return newInternalErrorWithCause(map[string]any{"error": err.Error()}, err)
 }

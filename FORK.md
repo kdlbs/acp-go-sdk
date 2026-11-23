@@ -43,7 +43,7 @@ Supporting pieces:
 - `ClientSideConnection.isKnownMethod(method)` is generated into `client_gen.go`
   by `cmd/generate` (see `cmd/generate/internal/emit/dispatch.go`). It is
   reproducible by `make version` and must not be hand-edited.
-- `isInboundRequest(ctx)` gates the fallback to genuine inbound requests.
+- `acp.IsInboundRequest(ctx)` gates the fallback to inbound requests.
 
 Files: `extensions.go`, `connection.go`, `client_gen.go`,
 `cmd/generate/internal/emit/dispatch.go`. Tests:
@@ -138,6 +138,22 @@ and distinct timeout, cancellation, and peer-disconnect errors.
 
 Tests: `connection_notification_barrier_test.go`, `connection_cancel_test.go`,
 `connection_queue_test.go`, and `errors_test.go`.
+
+### 9. ACP v2 Preview client
+
+The `github.com/coder/acp-go-sdk/experimental/v2` package implements the
+Preview client over the shared stdio transport. It uses handwritten types
+for the [pinned v2 schema](schema/v2/README.md). The application owns the
+agent process and its streams.
+
+The Preview client enables `acp.WithStrictResponses()`. This option validates
+the JSON-RPC reply envelope and uses `json.Number` for numbers in peer error data.
+Its inbound error diagnostics omit peer data.
+`v2.LegacyPeerError` identifies a recognized v1 peer. When `errors.As` finds
+that error, the application can start a fresh process and connect its v1 client.
+
+The paired-pipe tests cover both prompt acknowledgement orders, replay,
+negotiation, callback cancellation, and notification drain after EOF.
 
 ## Code generation is self-contained
 

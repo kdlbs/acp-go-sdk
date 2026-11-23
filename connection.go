@@ -31,6 +31,7 @@ var errNotificationQueueOverflow = ErrNotificationQueueOverflow
 type connectionOptions struct {
 	maxQueuedNotifications        int
 	allowedExtensionNotifications map[string]struct{}
+	strictResponses               bool
 }
 
 // ConnectionOption configures a Connection.
@@ -45,6 +46,13 @@ func WithMaxQueuedNotifications(n int) ConnectionOption {
 	return func(o *connectionOptions) {
 		o.maxQueuedNotifications = n
 	}
+}
+
+// WithStrictResponses validates response envelopes and preserves numbers in
+// error data as json.Number. Invalid responses produce a local RequestError.
+// Inbound error logs omit peer data.
+func WithStrictResponses() ConnectionOption {
+	return func(o *connectionOptions) { o.strictResponses = true }
 }
 
 // WithAllowedExtensionNotifications opts a client-side connection into receiving
@@ -91,6 +99,40 @@ type anyMessage struct {
 	Params  json.RawMessage  `json:"params,omitempty"`
 	Result  json.RawMessage  `json:"result,omitempty"`
 	Error   *RequestError    `json:"error,omitempty"`
+
+	invalidResponse bool
+}
+
+func (m *anyMessage) unmarshalStrict(data []byte) error {
+	wire := struct {
+		*anyMessage
+		Error json.RawMessage `json:"error"`
+	}{anyMessage: m}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	if m.ID == nil || m.Method != "" {
+		return nil
+	}
+	if m.JSONRPC != "2.0" || (m.Result == nil) == (wire.Error == nil) {
+		m.invalidResponse = true
+		m.Error = NewInternalError(map[string]any{"error": "invalid JSON-RPC response envelope"})
+		return nil
+	}
+	if wire.Error != nil {
+		var result struct {
+			Code    *int    `json:"code"`
+			Message *string `json:"message"`
+			Data    any     `json:"data"`
+		}
+		if err := decodeOpaqueJSONField(wire.Error, &result); err != nil || result.Code == nil || result.Message == nil {
+			m.invalidResponse = true
+			m.Error = NewInternalError(map[string]any{"error": "invalid JSON-RPC error object"})
+			return nil
+		}
+		m.Error = &RequestError{Code: *result.Code, Message: *result.Message, Data: result.Data}
+	}
+	return nil
 }
 
 type queuedNotification struct {
@@ -119,7 +161,9 @@ func withInboundRequestContext(ctx context.Context, isRequest bool) context.Cont
 	return context.WithValue(ctx, inboundRequestContextKey{}, isRequest)
 }
 
-func isInboundRequest(ctx context.Context) bool {
+// IsInboundRequest reports whether the transport passed this context to the
+// handler of an inbound JSON-RPC request.
+func IsInboundRequest(ctx context.Context) bool {
 	isRequest, _ := ctx.Value(inboundRequestContextKey{}).(bool)
 	return isRequest
 }
@@ -129,6 +173,8 @@ type Connection struct {
 	w       io.Writer
 	r       io.Reader
 	handler MethodHandler
+
+	strictResponses bool
 
 	mu                   sync.Mutex
 	writeMu              sync.Mutex
@@ -164,6 +210,7 @@ type Connection struct {
 	// It is bounded to keep memory usage predictable.
 	maxQueuedNotifications int
 	notificationQueue      chan queuedNotification
+	notificationsDone      chan struct{}
 }
 
 func NewConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Reader, opts ...ConnectionOption) *Connection {
@@ -177,6 +224,7 @@ func newConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Rea
 		w:                      peerInput,
 		r:                      peerOutput,
 		handler:                handler,
+		strictResponses:        options.strictResponses,
 		pending:                make(map[string]*pendingResponse),
 		inflight:               make(map[string]context.CancelCauseFunc),
 		cancelRequestSignal:    make(chan struct{}, 1),
@@ -186,6 +234,7 @@ func newConnection(handler MethodHandler, peerInput io.Writer, peerOutput io.Rea
 		inboundCancel:          inboundCancel,
 		maxQueuedNotifications: options.maxQueuedNotifications,
 		notificationQueue:      make(chan queuedNotification, options.maxQueuedNotifications),
+		notificationsDone:      make(chan struct{}),
 	}
 	c.notifyCond = sync.NewCond(&c.notifyMu)
 	go func() {
@@ -209,6 +258,22 @@ func (c *Connection) loggerOrDefault() *slog.Logger {
 		return c.logger
 	}
 	return slog.Default()
+}
+
+func (c *Connection) logInboundError(message string, err error, field string, payload []byte) {
+	logger := c.loggerOrDefault()
+	if c.strictResponses {
+		logger.Error(message)
+		return
+	}
+	var details []slog.Attr
+	if err != nil {
+		details = append(details, slog.Any("err", err))
+	}
+	if field != "" {
+		details = append(details, slog.String(field, string(payload)))
+	}
+	logger.LogAttrs(context.Background(), slog.LevelError, message, details...)
 }
 
 const (
@@ -461,8 +526,13 @@ func (c *Connection) receive() {
 		}
 
 		var msg anyMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			c.loggerOrDefault().Error("failed to parse incoming message", "err", err, "raw", string(line))
+		if c.strictResponses {
+			err = msg.unmarshalStrict(line)
+		} else {
+			err = json.Unmarshal(line, &msg)
+		}
+		if err != nil {
+			c.logInboundError("failed to parse incoming message", err, "raw", line)
 			continue
 		}
 
@@ -480,7 +550,7 @@ func (c *Connection) receive() {
 			if msg.ID != nil {
 				idKey, err := canonicalJSONRPCIDKey(*msg.ID)
 				if err != nil {
-					c.loggerOrDefault().Error("failed to canonicalize inbound request id", "err", err, "id", string(*msg.ID))
+					c.logInboundError("failed to canonicalize inbound request id", err, "id", *msg.ID)
 					idKey = string(*msg.ID)
 				}
 				reqCtx, cancel := context.WithCancelCause(c.ctx)
@@ -529,7 +599,7 @@ func (c *Connection) receive() {
 				return
 			}
 		default:
-			c.loggerOrDefault().Error("received message with neither id nor method", "raw", string(line))
+			c.logInboundError("received message with neither id nor method", nil, "raw", line)
 		}
 	}
 }
@@ -568,20 +638,17 @@ func (c *Connection) shutdownReceive(cause error) {
 	// notification handlers may legitimately block until their context is canceled.
 	close(c.notificationQueue)
 
-	c.notifyMu.Lock()
-	finalEnqueuedSeq := c.lastEnqueuedNotificationSeq
-	if c.completedNotificationSeq > finalEnqueuedSeq {
-		c.notifyMu.Unlock()
-		panic("completed notification sequence exceeded final enqueued sequence during shutdown")
-	}
-	c.notifyMu.Unlock()
-
-	// Cancel inboundCtx after notifications finish, but ensure we don't leak forever if a
-	// handler blocks waiting for cancellation.
-	go func(finalEnqueuedSeq uint64) {
-		c.waitForNotificationDrain(finalEnqueuedSeq, notificationQueueDrainTimeout)
+	// Allow the handlers to finish processing queued notifications before
+	// cancellation. The timer releases handlers that are waiting on their context.
+	go func() {
+		timer := time.NewTimer(notificationQueueDrainTimeout)
+		defer timer.Stop()
+		select {
+		case <-c.notificationsDone:
+		case <-timer.C:
+		}
 		c.inboundCancel(cause)
-	}(finalEnqueuedSeq)
+	}()
 
 	c.loggerOrDefault().Info("connection closed", "cause", cause.Error())
 }
@@ -589,6 +656,7 @@ func (c *Connection) shutdownReceive(cause error) {
 // processNotifications processes notifications sequentially to maintain order.
 // It terminates when notificationQueue is closed (e.g. on disconnect in receive()).
 func (c *Connection) processNotifications() {
+	defer close(c.notificationsDone)
 	for queued := range c.notificationQueue {
 		c.handleInbound(c.inboundCtx, queued.msg)
 
@@ -611,7 +679,7 @@ func (c *Connection) processNotifications() {
 func (c *Connection) handleResponse(msg *anyMessage) {
 	idStr, err := canonicalJSONRPCIDKey(*msg.ID)
 	if err != nil {
-		c.loggerOrDefault().Error("failed to canonicalize response id", "err", err, "id", string(*msg.ID))
+		c.logInboundError("failed to canonicalize response id", err, "id", *msg.ID)
 		idStr = string(*msg.ID)
 	}
 
@@ -639,7 +707,7 @@ func (c *Connection) handleResponse(msg *anyMessage) {
 // that arrived for a pending request. A contradictory envelope that also
 // carries a result payload establishes no provenance.
 func markRemoteErrorEnvelope(msg anyMessage) {
-	if msg.Error == nil || len(bytes.TrimSpace(msg.Result)) > 0 {
+	if msg.Error == nil || msg.invalidResponse || len(bytes.TrimSpace(msg.Result)) > 0 {
 		return
 	}
 	msg.Error.remoteResponse = true
@@ -648,7 +716,7 @@ func markRemoteErrorEnvelope(msg anyMessage) {
 func (c *Connection) handleCancelRequest(msg *anyMessage) {
 	var p cancelRequestParams
 	if err := json.Unmarshal(msg.Params, &p); err != nil {
-		c.loggerOrDefault().Error("failed to parse $/cancel_request params", "err", err)
+		c.logInboundError("failed to parse $/cancel_request params", err, "", nil)
 		return
 	}
 	if len(bytes.TrimSpace(p.RequestID)) == 0 {
@@ -658,7 +726,7 @@ func (c *Connection) handleCancelRequest(msg *anyMessage) {
 
 	idKey, err := canonicalJSONRPCIDKey(p.RequestID)
 	if err != nil {
-		c.loggerOrDefault().Error("failed to canonicalize $/cancel_request requestId", "err", err, "requestId", string(p.RequestID))
+		c.logInboundError("failed to canonicalize $/cancel_request requestId", err, "requestId", p.RequestID)
 		idKey = string(p.RequestID)
 	}
 
@@ -696,7 +764,7 @@ func (c *Connection) handleInbound(ctx context.Context, req *anyMessage) {
 			if err.Code == -32601 && strings.HasPrefix(req.Method, "_") {
 				return
 			}
-			c.loggerOrDefault().Error("failed to handle notification", "method", req.Method, "err", err)
+			c.logInboundError("failed to handle notification", err, "method", []byte(req.Method))
 		}
 		return
 	}
@@ -937,45 +1005,6 @@ func (c *Connection) waitNotificationsUpTo(ctx context.Context, target uint64) e
 	return nil
 }
 
-func (c *Connection) waitForNotificationDrain(target uint64, timeout time.Duration) {
-	if target == 0 {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	stopWake := make(chan struct{})
-	defer close(stopWake)
-
-	c.notifyMu.Lock()
-	defer c.notifyMu.Unlock()
-	if target > c.lastEnqueuedNotificationSeq {
-		panic("drain target exceeded last enqueued notification sequence")
-	}
-
-	go func() {
-		select {
-		case <-ctx.Done():
-		case <-stopWake:
-			return
-		}
-		c.notifyMu.Lock()
-		c.notifyCond.Broadcast()
-		c.notifyMu.Unlock()
-	}()
-
-	for c.completedNotificationSeq < target {
-		if c.completedNotificationSeq > c.lastEnqueuedNotificationSeq {
-			panic("completed notification sequence exceeded enqueued notification sequence during drain")
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		c.notifyCond.Wait()
-	}
-}
-
 func (c *Connection) cleanupPending(idKey string) {
 	c.mu.Lock()
 	delete(c.pending, idKey)
@@ -1052,4 +1081,10 @@ func (c *Connection) prepareNotification(method string, params any) (anyMessage,
 // (typically when the peer disconnects or the input stream is closed).
 func (c *Connection) Done() <-chan struct{} {
 	return c.ctx.Done()
+}
+
+// NotificationsDone closes after the receive loop stops and the notification
+// worker finishes handling all queued notifications.
+func (c *Connection) NotificationsDone() <-chan struct{} {
+	return c.notificationsDone
 }
