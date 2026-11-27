@@ -164,3 +164,23 @@ func TestClientAllowedExtensionNotifications(t *testing.T) {
 		}
 	})
 }
+
+type rawUpdateClient struct {
+	clientFuncs
+	seen []string
+}
+
+func (c *rawUpdateClient) HandleRawSessionUpdate(_ context.Context, params json.RawMessage) (bool, error) {
+	c.seen = append(c.seen, string(params))
+	return true, nil
+}
+
+func TestRawSessionUpdate(t *testing.T) {
+	client := new(rawUpdateClient)
+	c := &ClientSideConnection{client: client}
+	raw := json.RawMessage(`{"sessionId":"parent","update":{"sessionUpdate":"vendor_child","id":"child"}}`)
+	_, err := c.handleWithExtensions(context.Background(), ClientMethodSessionUpdate, raw)
+	if err != nil || len(client.seen) != 1 || client.seen[0] != string(raw) {
+		t.Fatalf("raw callback = %v, error = %v", client.seen, err)
+	}
+}

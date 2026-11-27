@@ -39,6 +39,13 @@ type ExtensionNotificationHandler interface {
 	HandleExtensionNotification(ctx context.Context, method string, params json.RawMessage) error
 }
 
+// RawSessionUpdateHandler can consume vendor-specific session/update notifications
+// before generated union decoding. It runs in normal notification order.
+// Return false and nil to continue with the standard typed handler.
+type RawSessionUpdateHandler interface {
+	HandleRawSessionUpdate(context.Context, json.RawMessage) (handled bool, err error)
+}
+
 func validateExtensionMethodName(method string) error {
 	if method == "" {
 		return fmt.Errorf("extension method name must be non-empty")
@@ -78,6 +85,17 @@ func (c *ClientSideConnection) allowsExtensionNotification(method string) bool {
 }
 
 func (c *ClientSideConnection) handleWithExtensions(ctx context.Context, method string, params json.RawMessage) (any, *RequestError) {
+	if method == ClientMethodSessionUpdate && !IsInboundRequest(ctx) {
+		if h, ok := c.client.(RawSessionUpdateHandler); ok {
+			handled, err := h.HandleRawSessionUpdate(ctx, params)
+			if err != nil {
+				return nil, toReqErr(err)
+			}
+			if handled {
+				return nil, nil
+			}
+		}
+	}
 	if c.isKnownMethod(method) {
 		return c.handle(ctx, method, params)
 	}
